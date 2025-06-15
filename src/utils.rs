@@ -1,0 +1,85 @@
+use regex::Regex;
+use regex::escape as regex_escape;
+use log::warn;
+
+pub fn find_box(pred_str: &str) -> Option<String> {
+    let after_boxed = match pred_str.rfind("boxed") {
+        Some(pos) => &pred_str[pos + 5..], // 5 is the length of "boxed"
+        None => return None,
+    };
+
+    if after_boxed.is_empty() {
+        return None;
+    }
+
+    if after_boxed.starts_with('{') {
+        let mut stack = 1;
+        let mut result = String::new();
+        let mut chars = after_boxed.chars().skip(1);
+        while let Some(c) = chars.next() {
+            match c {
+                '{' => stack += 1,
+                '}' => {
+                    stack -= 1;
+                    if stack == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            result.push(c);
+        }
+        Some(result)
+    } else {
+        let end = after_boxed.find('$').unwrap_or(after_boxed.len());
+        let result = after_boxed[..end].trim().to_string();
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
+    }
+}
+
+pub fn extract_tag_content(text: &str, tag: &str) -> Option<String> {
+    // Extract the content in the last xml-style tag (tags excluded)
+    let escaped_tag = regex_escape(tag);
+    let pattern = format!(r"<{0}>(?s:(.*?))</{0}>", escaped_tag);
+    let re = Regex::new(&pattern).ok()?;
+    
+    let mut last_content = None;
+    for caps in re.captures_iter(text) {
+        if let Some(inner) = caps.get(1) {
+            last_content = Some(inner.as_str().to_string());
+        }
+    }
+    
+    if last_content.is_none() {
+        warn!("No content extracted in given tag <{}>.", tag);
+    }
+    
+    last_content
+}
+
+pub fn extract_all_tag_content(text: &str, tag: &str) -> Vec<String> {
+    // Extract all the content in the xml-style tag (tags excluded)
+    let escaped_tag = regex_escape(tag);
+    let pattern = format!(r"<{0}>(?s:(.*?))</{0}>", escaped_tag);
+    let re = match Regex::new(&pattern) {
+        Ok(re) => re,
+        Err(_) => {
+            warn!("Invalid regex pattern for tag: {}", tag);
+            return Vec::new();
+        }
+    };
+    
+    let contents: Vec<String> = re.captures_iter(text)
+        .filter_map(|caps| caps.get(1).map(|m| m.as_str().to_string()))
+        .collect();
+    
+    if contents.is_empty() {
+        warn!("No content extracted in given tag <{}>.", tag);
+    }
+    
+    contents
+}
