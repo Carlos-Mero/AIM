@@ -43,10 +43,10 @@ impl MemoryBlock {
     pub fn deps(mut self, deps: Vec<usize>) -> Self {self.deps = deps; self}
 
     pub fn _format(&self) -> String {
-        format!("<{0}>\n**content**: {1}\n</{0}>", &self.memtype, &self.content)
+        format!("\\begin{{{0}}}\n**content**: {1}\n\\end{{{0}}}", &self.memtype, &self.content)
     }
     pub fn _format_with_proof(&self) -> String {
-        format!("<{0}>\n\n**content**: {1}\n**proof**: {2}\n</{0}>", &self.memtype, &self.content, &self.proof)
+        format!("\\begin{{{0}}}\n\n**content**: {1}\n**proof**: {2}\n\\end{{{0}}}", &self.memtype, &self.content, &self.proof)
     }
 }
 
@@ -252,28 +252,19 @@ impl Agent for Explorer {
         }
         let prompt = concat!("### Instruction\n",
              "\n",
-             "You are an expert that is knowledgeable across all domains in math. This time you are asked to help solve a frontier math problem. Its statement is as follows:\n",
+             "You are an expert that is knowledgeable across all domains in math. This time you are asked to help with our frontier math research. Its statement is as follows:\n",
              "\n").to_string() + 
              &problem_stat + 
              concat!("\n",
-             "This problem could be difficult and can not be directly solved, but you can make your contribution with the following instructions:\n",
+             "This problem could be difficult and not able to be directly solved, but you can make your contribution with the following instructions:\n",
              "\n",
-             "1. You need to explore different approaches or directions that might help with our final goal.\n",
-             "2. You need to include one or more interesting findings in your explorations as conjectures in your response.\n",
-             "3. Do not present any existing lemmas as your new conjectures. You can directly use them in your explorations.\n",
-             "4. You should wrap them inside two tags of xml style: <conjecture></conjecture>, and each of them should be equiped with a detailed, complete and rigorous proof.\n",
-             "5. You should explicitly write down every intermediate steps in derivations and calculations in the proof.\n",
-             "6. The proof should be wrapped in <proof></proof> tags directly followed by the conjecture.\n",
-             "\n",
-             "More accurately, each conjectures in your response should follow the format below:\n",
-             "\n",
-             "<conjecture>Your new findings here</conjecture>\n",
-             "<proof>Your proof of the conjecture above</proof>\n",
+             "1. You are required to explore different approaches or directions that might help with our final goal and write down one or more interesting findings in your explorations as conjectures in your response. DO NOT claim that you can not do this jod.\n",
+             "2. Do not include any existing lemmas as your new conjectures. You can directly use them in your explorations.\n",
+             "3. You should wrap your findings inside a latex environment, as \\begin{conjecture}Your new findings here\\end{conjecture}. Each conjecture should be equiped with a detailed, complete and rigorous proof. You should explicitly write down every intermediate derivation steps in the proof. The corresponding proof should be wrapped in \\begin{proof}Your proof of the conjecture above\\end{proof} directly followed by each conjecture. The quantities of conjectures and proofs must match exactly.\n",
              "\n",
              "Your conjectures will then be verified and collected as the basis for future explorations.",
-             "Moreover, when you think the time is right that you are able to prove the original problem, you can simply state your proof inside <final_proof></final_proof>.",
-             "Do not include these components if you are not sure about the final proof.",
-             "Remember that the final proof should be a complete proof that do not depend on any other unsolved conjectures.")
+             "Moreover, when you think the time is right that you are able to prove the original problem, you can simply state your proof inside \\begin{final_proof}\\end{final_proof}."
+             )
              + &context_prefix;
 
         return self.client.comp(&prompt, &self.model, self.streaming).await;
@@ -399,13 +390,15 @@ impl Agent for Refiner {
             context_prefix = format!("\n\n### Context and History Explorations\n\nHere is a list of context that we have collected for this problem or our history findings during exploration. They serve as the background of the conjecture and proof, and can be accepted without controversy as correct.\n\n{}", context);
         }
         let prompt = concat!(
-             "### Instruction\n",
-             "\n",
-             "You are an expert that is knowledgeable across all domains in math. This time you are asked to help with frontier math research. We have proposed a new conjecture, and tried to prove it. However, one reviewer have found some flaws in our proof. You need to help refine or even completely rewrite the proof so that it can be **correct**, **complete** and **rigorous**. You can also modify the statement of this conjecture itself if needed. You should wrap the conjecture in <conjecture></conjecture> tags and the proof in <proof></proof> tags as follows in your response:\n",
-             "\n",
-             "<conjecture>original or modified conjecture</conjecture>\n",
-             "<proof>refined proof of the conjecture above</proof>\n",
-             "\n").to_string() + &conjecture_proof_review + &context_prefix;
+            "### Instruction\n",
+            "\n",
+            "You are an expert that is knowledgeable across all domains in math. This time you are asked to help with frontier math research. We have proposed a new conjecture, and tried to prove it. However, one reviewer have found some flaws in our proof. You need to help us with our research project by:\n",
+            "\n",
+            "1. Please reassess the correctness of this conjecture, and include a \"\\boxed{true}\" if you believe the conjecture is true in your response, and include a \"\\boxed{false}\" if you believe it is not true.\n",
+            "2. If this conjecture still holds, please help refine or even completely rewrite the proof so that it can be **correct**, **complete** and **rigorous**. You should wrap your new proof inside latex environment as \\begin{proof}\\end{proof} in your response.\n",
+            "3. And if this conjecture is not true, please state the opposite of this conjecture inside \\begin{conjecture}\\end{conjecture}, and your rationales or proofs of this judgement inside \\begin{proof}\\end{proof}\n",
+            "\n"
+        ).to_string() + &conjecture_proof_review + &context_prefix;
         return self.client.comp(&prompt, &self.model, self.streaming).await;
     }
 }
@@ -431,10 +424,10 @@ impl Agent for Formatter {
             "1. DO NOT modify or alter the original meaning in these contents.\n",
             "2. You should not use headings in the reformatted contents.\n",
             "3. Each math formula should be wrapped in dollars like $ $ for inline formula and $$ $$ for multiline one.\n",
-            "4. You should wrap the reformatted contents inside xml style tags as <markdown>reformatted contents here</markdown>\n",
+            "4. You should wrap the reformatted contents inside latex environment as \\begin{contents}reformatted contents here\\end{contents}\n",
             "\n",
             "Here is the original contents:\n",
-            "\n").to_string() + &format!("<original_contents>{}</original_contents>", self.content);
+            "\n").to_string() + &format!("\\begin{{contents}}{}\\end{{contents}}", self.content);
         return self.client.comp(&prompt, &self.model, false).await;
     }
 }

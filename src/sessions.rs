@@ -3,7 +3,7 @@ use std::fs;
 use std::sync::Arc;
 
 use crate::agents::{Agent, Explorer, Reviewer, Refiner, Formatter, MemoryBlock, Memory};
-use crate::utils::{extract_tag_content, extract_all_tag_content};
+use crate::utils::{extract_component, extract_all_component, find_box};
 use indicatif::{ProgressBar, ProgressStyle};
 
 use log::{info, warn, debug, error};
@@ -110,7 +110,9 @@ impl ResearchSession {
     }
 
     fn update_memory(&mut self, nmemory: MemoryBlock) {
-        info!("Session Memory Updated with: {:?}", serde_json::to_string_pretty(&nmemory));
+        if let Ok(mem_str) = serde_json::to_string_pretty(&nmemory) {
+            info!("Session Memory Updated with: {}", mem_str);
+        }
         self.memory.update(nmemory);
         if let Some(context) = self.memory.format_all() {
             self.explorer.set_context(&context);
@@ -152,7 +154,7 @@ impl ResearchSession {
         for result in results {
             match result {
                 Ok((i, response)) => {
-                    if let Some(content) = extract_tag_content(&response, "markdown") {
+                    if let Some(content) = extract_component(&response, "contents") {
                         self.memory.memory[i].content = content;
                     }
                 }
@@ -185,7 +187,7 @@ impl ResearchSession {
         for result in results {
             match result {
                 Ok((i, response)) => {
-                    if let Some(proof) = extract_tag_content(&response, "markdown") {
+                    if let Some(proof) = extract_component(&response, "contents") {
                         self.memory.memory[i].proof = proof;
                     }
                 }
@@ -216,19 +218,23 @@ impl ResearchSession {
         // This function retures true if the problem is solved, else it will return false.
         let raw_exploration = self.explorer._process().await?;
 
-        let mut conjectures = extract_all_tag_content(&raw_exploration, "conjecture");
-        let mut proofs = extract_all_tag_content(&raw_exploration, "proof");
+        let mut conjectures = extract_all_component(&raw_exploration, "conjecture");
+        let mut proofs = extract_all_component(&raw_exploration, "proof");
 
         if conjectures.len() != proofs.len() {
             error!(
                 "Mismatched number of conjectures ({}) and proofs ({})",
                 conjectures.len(),
                 proofs.len());
+            debug!("Extracted conjectures: {:#?}", &conjectures);
+            debug!("Extracted proofs: {:#?}", &proofs);
             return Ok(false);
+        } else {
+            info!("Successfully collected {} conjectures and proofs in exploration.", conjectures.len());
         }
 
         for (conj, proof) in conjectures.iter_mut().zip(proofs.iter_mut()) {
-            info!("Start verifing a conjecture");
+            info!("Start verifying a conjecture");
             for i in 0..self.config.iterations {
                 self.reviewer.set_conjecture(&*conj);
                 self.reviewer.set_proof(&*proof);
@@ -237,17 +243,26 @@ impl ResearchSession {
                     // Directly end this exploration step when one conjecture fails after several
                     // iterations
                     if i == self.config.iterations - 1 {
+                        info!("Refinement failed after {} trials.", self.config.iterations);
                         return Ok(false);
                     }
+                    info!("A flaw was found in the proof, trying to refine.");
                     self.refiner.set_conjecture(&*conj);
                     self.refiner.set_proof(&*proof);
                     self.refiner.set_review(review);
                     let raw_refinement = self.refiner._process().await?;
-                    if let Some(n_conj) = extract_tag_content(&raw_refinement, "conjecture") {
-                        *conj = n_conj;
-                    }
-                    if let Some(n_proof) = extract_tag_content(&raw_refinement, "proof") {
-                        *proof = n_proof;
+                    if let Some(judgement) = find_box(&raw_refinement) {
+                        if judgement == "false" {
+                            if let Some(n_conj) = extract_component(&raw_refinement, "conjecture") {
+                                *conj = n_conj;
+                            }
+                        }
+                        if let Some(n_proof) = extract_component(&raw_refinement, "proof") {
+                            *proof = n_proof;
+                        }
+                    } else {
+                        error!("Found a format error in refinement, end this step.");
+                        return Ok(false);
                     }
                 } else {
                     self.update_memory(MemoryBlock::new()
@@ -262,7 +277,7 @@ impl ResearchSession {
             }
         }
 
-        if let Some(mut final_proof) = extract_tag_content(&raw_exploration, "final_proof") {
+        if let Some(mut final_proof) = extract_component(&raw_exploration, "final_proof") {
             info!("Start verifing the final proof");
             for i in 0..self.config.iterations {
                 self.reviewer.set_conjecture(&self.config.problem);
@@ -276,7 +291,7 @@ impl ResearchSession {
                     self.refiner.set_proof(&final_proof);
                     self.refiner.set_review(review);
                     let raw_refinement = self.refiner._process().await?;
-                    if let Some(n_proof) = extract_tag_content(&raw_refinement, "proof") {
+                    if let Some(n_proof) = extract_component(&raw_refinement, "proof") {
                         final_proof = n_proof;
                     }
                 } else {
@@ -343,7 +358,6 @@ impl Session for ResearchSession {
             if solved {break;}
         }
         self.format_to_markdown().await?;
-        pb.finish_with_message("ResearchSession Completed!");
 
         Ok(())
     }

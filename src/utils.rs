@@ -41,45 +41,39 @@ pub fn find_box(pred_str: &str) -> Option<String> {
     }
 }
 
-pub fn extract_tag_content(text: &str, tag: &str) -> Option<String> {
-    // Extract the content in the last xml-style tag (tags excluded)
+pub fn extract_component(text: &str, tag: &str) -> Option<String> {
+    // Extract the content in the last latex component (tags excluded)
     let escaped_tag = regex_escape(tag);
-    let pattern = format!(r"<{0}>(?s:(.*?))</{0}>", escaped_tag);
+    let pattern = format!(r"(?s)\\begin\{{{}\}}((?:.|\n)*?)\\end\{{{}\}}", escaped_tag, escaped_tag);
     let re = Regex::new(&pattern).ok()?;
     
-    let mut last_content = None;
-    for caps in re.captures_iter(text) {
-        if let Some(inner) = caps.get(1) {
-            last_content = Some(inner.as_str().to_string());
-        }
-    }
-    
-    if last_content.is_none() {
-        warn!("No content extracted in given tag <{}>.", tag);
-    }
-    
-    last_content
+    re.captures_iter(text)
+        .last()
+        .and_then(|caps| caps.get(1).map(|m| m.as_str().to_string()))
+        .or_else(|| {
+            warn!("No content extracted for tag: {}", tag);
+            None
+        })
 }
 
-pub fn extract_all_tag_content(text: &str, tag: &str) -> Vec<String> {
+pub fn extract_all_component(text: &str, tag: &str) -> Vec<String> {
     // Extract all the content in the xml-style tag (tags excluded)
     let escaped_tag = regex_escape(tag);
-    let pattern = format!(r"<{0}>(?s:(.*?))</{0}>", escaped_tag);
+    let pattern = format!(r"\\begin\{{{}\}}(?s:(.*?))\\end\{{{}\}}", escaped_tag, escaped_tag);
     let re = match Regex::new(&pattern) {
         Ok(re) => re,
-        Err(_) => {
-            warn!("Invalid regex pattern for tag: {}", tag);
+        Err(e) => {
+            warn!("Invalid regex for tag '{}': {}", tag, e);
             return Vec::new();
         }
     };
-    
-    let contents: Vec<String> = re.captures_iter(text)
+
+    let contents: Vec<_> = re.captures_iter(text)
         .filter_map(|caps| caps.get(1).map(|m| m.as_str().to_string()))
         .collect();
-    
+
     if contents.is_empty() {
-        warn!("No content extracted in given tag <{}>.", tag);
+        warn!("No content found for tag: {}", tag);
     }
-    
     contents
 }
