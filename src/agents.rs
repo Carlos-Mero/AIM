@@ -177,7 +177,6 @@ impl LMClient {
                         while let Some(newline_pos) = sse_buffer.find('\n') {
                             let line = sse_buffer.drain(..=newline_pos).collect::<String>();
                             let line = line.trim_end_matches('\n').trim_end_matches('\r');
-                        // for line in chunk_str.lines() {
                             if line.starts_with("data:") {
                                 let data_str = line.trim_start_matches("data:").trim();
 

@@ -329,8 +329,6 @@ impl Session for ResearchSession {
         info!("Loaded problem: {:?}", &problem);
         self.explorer.set_problem(problem);
 
-        self.load_context()?;
-
         if self.config.resume {
             info!("Resuming from previous explorations");
             self.resume()?;
@@ -343,6 +341,8 @@ impl Session for ResearchSession {
                     return Ok(());
                 }
             }
+        } else {
+            self.load_context()?;
         }
 
         let pb = ProgressBar::new(self.config.steps.into()).with_style(ProgressStyle::with_template(
