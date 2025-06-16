@@ -43,10 +43,13 @@ impl MemoryBlock {
     pub fn deps(mut self, deps: Vec<usize>) -> Self {self.deps = deps; self}
 
     pub fn _format(&self) -> String {
-        format!("\\begin{{{0}}}\n**content**: {1}\n\\end{{{0}}}", &self.memtype, &self.content)
+        format!("\\begin{{{0}}}\n{1}\n\n**DEPENDENCY**: {2:?}\n\\end{{{0}}}", &self.memtype, &self.content, &self.deps)
     }
     pub fn _format_with_proof(&self) -> String {
-        format!("\\begin{{{0}}}\n\n**content**: {1}\n**proof**: {2}\n\\end{{{0}}}", &self.memtype, &self.content, &self.proof)
+        let proof_content = if self.proof.is_empty() {String::new()} else {
+            format!("\n\\begin{{proof}}\n{0}\n\\end{{proof}}", &self.proof)
+        };
+        format!("\\begin{{{0}}}\n{1}\n\n**DEPENDENCY**: {2:?}\n\\end{{{0}}}{3}", &self.memtype, &self.content, &self.deps, &proof_content)
     }
 }
 
@@ -135,7 +138,7 @@ impl LMClient {
             "temperature": 0.6,
             "stream": true
         });
-        let url = format!("{}/v1/chat/completions", &self.base_url.trim_end_matches('/'));
+        let url = format!("{}/v1/chat/completions", &self.base_url.trim_end_matches('/').trim_end_matches("/v1"));
 
         let mut attempt: u8 = 0;
 
@@ -259,21 +262,27 @@ impl Agent for Explorer {
             context_prefix = format!("\n\nHere is a list of context that we have collected for this problem or our history findings during exploration. They can be accepted without controversy as correct, and you can begin your exploration based on them.\n\n### Context and History Explorations\n\n{}", context);
         }
         let prompt = concat!("### Instruction\n",
-             "\n",
-             "You are an expert that is knowledgeable across all domains in math. This time you are asked to help with our frontier math research. Its statement is as follows:\n",
-             "\n").to_string() + 
-             &problem_stat + 
-             concat!("\n",
-             "This problem could be difficult and not able to be directly solved, but you can make your contribution with the following instructions:\n",
-             "\n",
-             "1. You are required to explore different approaches or directions that might help with our final goal and write down one or more interesting findings in your explorations as conjectures in your response. DO NOT claim that you can not do this jod.\n",
-             "2. Your conjecture must contain the complete definitions required within it, such that it is able to stand alone as an independent lemma. Do not propose any existing lemmas as your new conjectures. You can directly use them in your explorations.\n",
-             "3. You should wrap your findings inside a latex environment, as \\begin{conjecture}Your new findings here\\end{conjecture}. Each conjecture should be equiped with a detailed, complete and rigorous proof. You should explicitly write down every intermediate derivation steps in the proof. The corresponding proof should be wrapped in \\begin{proof}Your proof of the conjecture above\\end{proof} directly followed by each conjecture. The quantities of conjectures and proofs must match exactly.\n",
-             "\n",
-             "Your conjectures will then be verified and collected as the basis for future explorations.",
-             "Moreover, when you think the time is right that you are able to prove the original problem, you can simply state your proof inside \\begin{final_proof}\\end{final_proof}."
-             )
-             + &context_prefix;
+            "\n",
+            "You are an expert that is knowledgeable across all domains in math. This time you are asked to help with our frontier math research. Its statement is as follows:\n",
+            "\n").to_string() + 
+        &problem_stat + 
+        concat!("\n",
+            "This problem could be difficult and not able to be directly solved, but you can make your contribution with the following instructions:\n",
+            "\n",
+            "1. You are required to explore different approaches or directions that might help with our final goal, and write down one interesting finding in your explorations as a new conjecture in your response. DO NOT claim that you can not do this jod.\n",
+            "2. Your conjecture must contain the complete definitions required within it, such that it is able to stand alone as an independent lemma, unless it is declared in memory. Do not propose any existing lemmas as your new conjectures. You can directly use them in your explorations.\n",
+            "3. You should wrap your finding inside a latex environment: \\begin{conjecture}\\end{conjecture}. This conjecture should be equiped with a detailed, complete and rigorous proof. You should explicitly write down every intermediate derivation step in the proof. The corresponding proof should be wrapped in \\begin{proof}\\end{proof} directly followed by the conjecture.\n",
+            "4. After these components you should also provide the dependency of this conjecture. You need to write down the memory IDs of lemmas used in this conjecture in a JSON array format, and warp them inside \\begin{dependency}\\end{dependency}. For example, a dependency of a new conjecture could be \\begin{dependency}[0, 3, 4]\\end{dependency}. You can use an empty array \"[]\" when this conjecture does not depend on other lemmas.\n",
+            "\n",
+            "More accurately, your response should obey the following format:\n",
+            "\n",
+            "\\begin{conjecture}Your new findings here\\end{conjecture}\n",
+            "\\begin{proof}Your proof of the conjecture above\\end{proof}\n",
+            "\\begin{dependency}An json array of related memory IDs of this conjecture\\end{dependency}",
+            "\n",
+            "Moreover, when you think the time is right that you are able to prove the original problem, you can simply state your proof inside \\begin{final_proof}\\end{final_proof}, and explicitly write down its dependency in \\begin{dependency}\\end{dependency}. In this case, you do not need to propose any new conjectures for this problem."
+        )
+        + &context_prefix;
 
         return self.client.comp(&prompt, &self.model, self.streaming).await;
     }

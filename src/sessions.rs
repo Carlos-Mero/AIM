@@ -89,6 +89,7 @@ impl ResearchSession {
             return Ok(());
         }
         let context = fs::read_to_string(context_path)?;
+        info!("loaded problem context: {:?}", &context);
         self.memory.update(MemoryBlock::new()
             .memtype("context")
             .content(context)
@@ -220,6 +221,7 @@ impl ResearchSession {
 
         let mut conjectures = extract_all_component(&raw_exploration, "conjecture");
         let mut proofs = extract_all_component(&raw_exploration, "proof");
+        let mut depss = extract_all_component(&raw_exploration, "dependency");
 
         if conjectures.len() != proofs.len() {
             error!(
@@ -233,7 +235,7 @@ impl ResearchSession {
             info!("Successfully collected {} conjectures and proofs in exploration.", conjectures.len());
         }
 
-        for (conj, proof) in conjectures.iter_mut().zip(proofs.iter_mut()) {
+        for ((conj, proof), deps) in conjectures.iter_mut().zip(proofs.iter_mut()).zip(depss.iter_mut()) {
             info!("Start verifying a conjecture");
             for i in 0..self.config.iterations {
                 self.reviewer.set_conjecture(&*conj);
@@ -269,6 +271,7 @@ impl ResearchSession {
                         .memtype("lemma")
                         .content(&*conj)
                         .proof(&*proof)
+                        .deps(serde_json::from_str::<Vec<usize>>(deps).unwrap_or_default())
                         .solved(true)
                         .reviews(self.config.reviews)
                     );
@@ -299,6 +302,7 @@ impl ResearchSession {
                         .memtype("theorem")
                         .content(&self.config.problem)
                         .proof(&final_proof)
+                        .deps(serde_json::from_str::<Vec<usize>>(&depss[depss.len()-1]).unwrap_or_default())
                         .solved(true)
                         .reviews(self.config.reviews)
                     );
