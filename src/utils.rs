@@ -44,7 +44,7 @@ pub fn find_box(pred_str: &str) -> Option<String> {
 pub fn extract_component(text: &str, tag: &str) -> Option<String> {
     // Extract the content in the last latex component (tags excluded)
     let escaped_tag = regex_escape(tag);
-    let pattern = format!(r"(?s)\\begin\{{{}\}}((?:.|\n)*?)\\end\{{{}\}}", escaped_tag, escaped_tag);
+    let pattern = format!(r"(?s)\\begin\{{{0}\}}((?:.|\n)*?)\\end\{{{0}\}}", escaped_tag);
     let re = Regex::new(&pattern).ok()?;
     
     re.captures_iter(text)
@@ -59,7 +59,7 @@ pub fn extract_component(text: &str, tag: &str) -> Option<String> {
 pub fn extract_all_component(text: &str, tag: &str) -> Vec<String> {
     // Extract all the content in the xml-style tag (tags excluded)
     let escaped_tag = regex_escape(tag);
-    let pattern = format!(r"\\begin\{{{}\}}(?s:(.*?))\\end\{{{}\}}", escaped_tag, escaped_tag);
+    let pattern = format!(r"(?s)\\begin\{{{0}\}}((?:.|\n)*?)\\end\{{{0}\}}", escaped_tag);
     let re = match Regex::new(&pattern) {
         Ok(re) => re,
         Err(e) => {

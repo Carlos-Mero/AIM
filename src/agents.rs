@@ -155,6 +155,7 @@ impl LMClient {
                 Ok(resp) if resp.status().is_success() => {
                     let mut stream = resp.bytes_stream();
                     let mut content_buffer = String::new();
+                    let mut sse_buffer = String::new();
                     let mut chunk_decode_retries: u8 = 0;
 
                     while let Some(chunk) = stream.next().await {
@@ -171,8 +172,12 @@ impl LMClient {
                             }
                         };
                         let chunk_str = String::from_utf8_lossy(&chunk);
+                        sse_buffer.push_str(&chunk_str);
 
-                        for line in chunk_str.lines() {
+                        while let Some(newline_pos) = sse_buffer.find('\n') {
+                            let line = sse_buffer.drain(..=newline_pos).collect::<String>();
+                            let line = line.trim_end_matches('\n').trim_end_matches('\r');
+                        // for line in chunk_str.lines() {
                             if line.starts_with("data:") {
                                 let data_str = line.trim_start_matches("data:").trim();
 
@@ -196,6 +201,10 @@ impl LMClient {
                                 }
                             }
                         }
+                    }
+
+                    if !sse_buffer.is_empty() {
+                        warn!("Remaining unprocessed data: {}", sse_buffer);
                     }
 
                     return Ok(content_buffer);
@@ -259,7 +268,7 @@ impl Agent for Explorer {
              "This problem could be difficult and not able to be directly solved, but you can make your contribution with the following instructions:\n",
              "\n",
              "1. You are required to explore different approaches or directions that might help with our final goal and write down one or more interesting findings in your explorations as conjectures in your response. DO NOT claim that you can not do this jod.\n",
-             "2. Do not include any existing lemmas as your new conjectures. You can directly use them in your explorations.\n",
+             "2. Your conjecture must contain the complete definitions required within it, such that it is able to stand alone as an independent lemma. Do not propose any existing lemmas as your new conjectures. You can directly use them in your explorations.\n",
              "3. You should wrap your findings inside a latex environment, as \\begin{conjecture}Your new findings here\\end{conjecture}. Each conjecture should be equiped with a detailed, complete and rigorous proof. You should explicitly write down every intermediate derivation steps in the proof. The corresponding proof should be wrapped in \\begin{proof}Your proof of the conjecture above\\end{proof} directly followed by each conjecture. The quantities of conjectures and proofs must match exactly.\n",
              "\n",
              "Your conjectures will then be verified and collected as the basis for future explorations.",
@@ -394,9 +403,8 @@ impl Agent for Refiner {
             "\n",
             "You are an expert that is knowledgeable across all domains in math. This time you are asked to help with frontier math research. We have proposed a new conjecture, and tried to prove it. However, one reviewer have found some flaws in our proof. You need to help us with our research project by:\n",
             "\n",
-            "1. Please reassess the correctness of this conjecture, and include a \"\\boxed{true}\" if you believe the conjecture is true in your response, and include a \"\\boxed{false}\" if you believe it is not true.\n",
-            "2. If this conjecture still holds, please help refine or even completely rewrite the proof so that it can be **correct**, **complete** and **rigorous**. You should wrap your new proof inside latex environment as \\begin{proof}\\end{proof} in your response.\n",
-            "3. And if this conjecture is not true, please state the opposite of this conjecture inside \\begin{conjecture}\\end{conjecture}, and your rationales or proofs of this judgement inside \\begin{proof}\\end{proof}\n",
+            "1. Please try to refine or even completely rewrite the proof so that it can be **correct**, **complete** and **rigorous**. You should wrap your new proof inside latex environment as \\begin{proof}\\end{proof} in your response. Once you have done this refinement, you should write down a \"\\boxed{true}\" at the end of your response.\n",
+            "2. And if you believe this conjecture itself is not true, please state the opposite of this conjecture inside \\begin{conjecture}\\end{conjecture}, and your rationales or proofs of this judgement inside \\begin{proof}\\end{proof}. Finally you should write down a \"\\boxed{false}\" at the end of your response.\n",
             "\n"
         ).to_string() + &conjecture_proof_review + &context_prefix;
         return self.client.comp(&prompt, &self.model, self.streaming).await;
