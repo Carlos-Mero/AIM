@@ -65,6 +65,40 @@ impl Memory {
     pub fn update(&mut self, nmemory: MemoryBlock) {
         self.memory.push(nmemory);
     }
+    pub fn format_deps(&self, id: usize, with_proof: bool) -> Option<String> {
+        // Format the given memory ID and all dependencies of it
+        let mut dep_ids: Vec<usize> = vec![id];
+        let mut retrieve_id: usize = 0;
+        let mut res = String::new();
+
+        while let Some(memblock) = &self.memory.get(dep_ids[retrieve_id]) {
+            for id in &memblock.deps {
+                if !dep_ids.contains(id) {
+                    dep_ids.push(*id);
+                }
+            }
+
+            retrieve_id += 1;
+            if retrieve_id >= dep_ids.len() {break;}
+        }
+
+        // Finally add the context information in memory id: 0 if exists
+        if let Some(memblock) = &self.memory.get(0) {
+            if !dep_ids.contains(&0) && memblock.memtype == "context" {
+                dep_ids.push(0);
+            }
+        }
+
+        for id in dep_ids.iter().rev() {
+            if let Some(memblock) = &self.memory.get(*id) {
+                res.push_str(&format!("#### Memory **ID: {}**\n\n{}\n\n",
+                    id,
+                    if with_proof {memblock._format_with_proof()} else {memblock._format()}));
+            }
+        }
+
+        if res.is_empty() {None} else {Some(res)}
+    }
     pub fn format_all(&self) -> Option<String> {
         // Format all memory blocks as the input of other agents
         if self.memory.is_empty() {

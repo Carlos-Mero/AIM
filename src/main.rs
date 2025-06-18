@@ -42,6 +42,10 @@ struct Cli {
     #[arg(long = "resume", action = clap::ArgAction::SetTrue, default_value_t = false)]
     resume: bool,
 
+    /// Reformat conjectures and proofs after explorations
+    #[arg(long = "reformat", action = clap::ArgAction::SetTrue, default_value_t = false)]
+    reformat: bool,
+
     /// Disable streaming output in each session
     #[arg(long = "no_streaming", action = clap::ArgAction::SetFalse, default_value_t = true)]
     streaming: bool,
@@ -66,6 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .reviews(cli.reviews)
             .iterations(cli.iterations)
             .resume(cli.resume)
+            .reformat(cli.reformat)
             .streaming(cli.streaming);
         let _ = aim.run_session(config).await;
     } else {

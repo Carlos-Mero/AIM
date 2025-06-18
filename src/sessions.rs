@@ -25,8 +25,9 @@ pub struct ResearchSessionConfig {
     iterations: u8,
     currect_steps: u32,
     problem: String,
-    resume: bool,
-    streaming: bool,
+    resume: bool, // resume from existing explore trajectory
+    reformat: bool, // reformat conjectures and proofs after exploration
+    streaming: bool, // streaming output in exploration
 }
 
 impl ResearchSessionConfig {
@@ -39,6 +40,7 @@ impl ResearchSessionConfig {
     pub fn reviews(mut self, reviews: u8) -> Self {self.reviews = reviews; self}
     pub fn iterations(mut self, iterations: u8) -> Self {self.iterations = iterations; self}
     pub fn resume(mut self, resume: bool) -> Self {self.resume = resume; self}
+    pub fn reformat(mut self, reformat: bool) -> Self {self.reformat = reformat; self}
     pub fn streaming(mut self, streaming: bool) -> Self {self.streaming = streaming; self}
     pub fn set_current_steps(&mut self, steps: u32) -> &Self {self.currect_steps = steps; self}
     pub fn set_problem(&mut self, problem: impl Into<String>) -> &Self {self.problem = problem.into(); self}
@@ -202,16 +204,22 @@ impl ResearchSession {
     }
 
     async fn format_to_markdown(&mut self) -> std::io::Result<()> {
-        let _ = self.format_memory_to_markdown().await;
+        if self.config.reformat {
+            let _ = self.format_memory_to_markdown().await;
+        }
         let md_path = self.config.logdir.as_path().join("all_memory.md");
+        let pp_path = self.config.logdir.as_path().join("proof_path.md");
         if let Some(memory_content) = self.memory.format_all_with_proof() {
             info!("Saving memory contents to path: {:#?}", md_path);
             let contents = format!("# Explore Trajectory of AIM\n\n{}", memory_content);
-            fs::write(md_path, contents)
-        } else {
-            debug!("No memory content was saved");
-            Ok(())
+            fs::write(md_path, contents)?;
         }
+        if let Some(proof_path_content) = self.memory.format_deps(self.memory.memory.len() - 1, true) {
+            info!("Saving proof paths to path: {:#?}", pp_path);
+            let contents = format!("# Complete Proof Path of AIM\n\n{}", proof_path_content);
+            fs::write(pp_path, contents)?;
+        }
+        Ok(())
     }
 
     pub async fn step(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
