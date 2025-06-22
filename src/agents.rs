@@ -39,8 +39,13 @@ impl MemoryBlock {
     pub fn proof(mut self, proof: impl Into<String>) -> Self {self.proof = proof.into(); self}
     pub fn solved(mut self, solved: bool) -> Self {self.solved = solved; self}
     pub fn reviews(mut self, reviews: u8) -> Self {self.reviews = reviews; self}
-    pub fn comment(mut self, comment: impl Into<String>) -> Self {self.comment = comment.into(); self}
     pub fn deps(mut self, deps: Vec<usize>) -> Self {self.deps = deps; self}
+    pub fn is_solved(&self) -> bool {self.solved}
+    pub fn set_solved(&mut self, solved: bool) -> &Self {self.solved = solved; self}
+    pub fn get_reviews(&self) -> u8 {self.reviews}
+    pub fn set_reviews(&mut self, reviews: u8) -> &Self {self.reviews = reviews; self}
+    pub fn get_comment(&self) -> &str {&self.comment}
+    pub fn set_comment(&mut self, comment: impl Into<String>) -> &Self {self.comment = comment.into(); self}
 
     pub fn _format(&self) -> String {
         format!("\\begin{{{0}}}\n{1}\n\n**DEPENDENCY**: {2:?}\n\\end{{{0}}}", &self.memtype, &self.content, &self.deps)
@@ -65,11 +70,11 @@ impl Memory {
     pub fn update(&mut self, nmemory: MemoryBlock) {
         self.memory.push(nmemory);
     }
-    pub fn format_deps(&self, id: usize, with_proof: bool) -> Option<String> {
+    pub fn get_proof_path_ids(&self, id: usize, include_end_node: bool) -> Vec<usize> {
         // Format the given memory ID and all dependencies of it
+        // ids are sorted in the decreasing order
         let mut dep_ids: Vec<usize> = vec![id];
         let mut retrieve_id: usize = 0;
-        let mut res = String::new();
 
         while let Some(memblock) = &self.memory.get(dep_ids[retrieve_id]) {
             for id in &memblock.deps {
@@ -81,8 +86,31 @@ impl Memory {
             retrieve_id += 1;
             if retrieve_id >= dep_ids.len() {break;}
         }
+        if !include_end_node {
+            dep_ids.remove(0);
+        }
+        return dep_ids;
+    }
 
-        // Finally add the context information in memory id: 0 if exists
+//    pub fn get_subgraph_ids(&self, id: usize) -> Vec<usize> {
+//        // Get all the memory ids derived from the given id
+//        let mut dev_ids: Vec<usize> = vec![id];
+//        for i in id+1 .. self.memory.len() {
+//            let memblock = &self.memory[i];
+//            for dep_id in &memblock.deps {
+//                if dev_ids.contains(dep_id) && !dev_ids.contains(&i) {
+//                    dev_ids.push(i);
+//                    break;
+//                }
+//            }
+//        }
+//        return dev_ids;
+//    }
+
+    pub fn format_deps(&self, id: usize, with_proof: bool, include_end_node: bool) -> Option<String> {
+        let mut dep_ids = self.get_proof_path_ids(id, include_end_node);
+        let mut res = String::new();
+        // add the context information in memory id: 0 if exists
         if let Some(memblock) = &self.memory.get(0) {
             if !dep_ids.contains(&0) && memblock.memtype == "context" {
                 dep_ids.push(0);
@@ -99,7 +127,7 @@ impl Memory {
 
         if res.is_empty() {None} else {Some(res)}
     }
-    pub fn format_all(&self) -> Option<String> {
+    pub fn format_all(&self, solved_only: bool) -> Option<String> {
         // Format all memory blocks as the input of other agents
         if self.memory.is_empty() {
             None
@@ -108,12 +136,13 @@ impl Memory {
                 self.memory
                     .iter()
                     .enumerate()
+                    .filter(|(_, mem)| if solved_only {mem.is_solved()} else {true})
                     .map(|(i, mem)| format!("#### Memory **ID: {i}**\n\n{}\n\n", mem._format()))
                     .collect::<String>(),
             )
         }
     }
-    pub fn format_all_with_proof(&self) -> Option<String> {
+    pub fn format_all_with_proof(&self, solved_only: bool) -> Option<String> {
         // Format all memory blocks with proofs as the final output
         if self.memory.is_empty() {
             None
@@ -122,6 +151,7 @@ impl Memory {
                 self.memory
                     .iter()
                     .enumerate()
+                    .filter(|(_, mem)| if solved_only {mem.is_solved()} else {true})
                     .map(|(i, mem)| format!("#### Memory **ID: {i}**\n\n{}\n\n", mem._format_with_proof()))
                     .collect::<String>(),
             )
@@ -161,6 +191,7 @@ impl LMClient {
     }
 
     async fn comp(&self, prompt: &str, model: &str, stream_output: bool) -> Result<String, Box<dyn std::error::Error>> {
+        debug!("Running language model completion with prompt {}", prompt);
         let request_body = json!({
             "model": model,
             "messages": [
@@ -290,7 +321,7 @@ impl Explorer {
 #[async_trait::async_trait]
 impl Agent for Explorer {
     async fn _process(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let problem_stat = format!("<problem>{}</problem>", &self.problem);
+        let problem_stat = format!("\\begin{{problem}}{}\\end{{problem}}", &self.problem);
         let mut context_prefix = String::new();
         if let Some(context) = &self.context {
             context_prefix = format!("\n\nHere is a list of context that we have collected for this problem or our history findings during exploration. They can be accepted without controversy as correct, and you can begin your exploration based on them.\n\n### Context and History Explorations\n\n{}", context);
@@ -373,14 +404,13 @@ impl Reviewer {
 
         while let Ok(review) = tasks.join_next().await? {
             if let Some(r) = review {
+                debug!("Collected one review: {}", &r);
                 if find_box(&r)? == "invalid" {
                     tasks.shutdown().await;
-                    pb.finish();
                     return Some(r);
                 }
             }
         }
-        pb.finish();
         return None;
     }
 }

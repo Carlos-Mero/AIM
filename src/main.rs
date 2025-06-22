@@ -31,7 +31,7 @@ struct Cli {
     steps: u32,
 
     /// parallel reviews in pessimistic verification
-    #[arg(short = 'r', long = "reviews", default_value_t = 4)]
+    #[arg(short = 'r', long = "reviews", default_value_t = 3)]
     reviews: u8,
 
     /// Maximum refine iterations
@@ -49,6 +49,10 @@ struct Cli {
     /// Disable streaming output in each session
     #[arg(long = "no_streaming", action = clap::ArgAction::SetFalse, default_value_t = true)]
     streaming: bool,
+
+    /// Disable theorem graph mode
+    #[arg(long = "no_tgm", action = clap::ArgAction::SetFalse, default_value_t = true)]
+    theorem_graph_mode: bool,
 }
 
 #[tokio::main]
@@ -71,7 +75,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .iterations(cli.iterations)
             .resume(cli.resume)
             .reformat(cli.reformat)
-            .streaming(cli.streaming);
+            .streaming(cli.streaming)
+            .theorem_graph_mode(cli.theorem_graph_mode);
         let _ = aim.run_session(config).await;
     } else {
         let _ = aim.run_tui().await;

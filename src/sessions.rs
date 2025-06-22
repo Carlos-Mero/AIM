@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::agents::{Agent, Explorer, Reviewer, Refiner, Formatter, MemoryBlock, Memory};
 use crate::utils::{extract_component, extract_all_component, find_box};
 use indicatif::{ProgressBar, ProgressStyle};
+use tokio::task::JoinSet;
 
 use log::{info, warn, debug, error};
 use serde::{Serialize, Deserialize};
@@ -14,7 +15,9 @@ pub trait Session: Send {
     async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>>;
 }
 
-#[derive(Default, Serialize, Deserialize)]
+const MAX_REVIEWS_PER_NODE: u8 = 24;
+
+#[derive(Default, Debug, Serialize, Deserialize)]
 pub struct ResearchSessionConfig {
     logdir: PathBuf,
     proof_model: String,
@@ -28,6 +31,7 @@ pub struct ResearchSessionConfig {
     resume: bool, // resume from existing explore trajectory
     reformat: bool, // reformat conjectures and proofs after exploration
     streaming: bool, // streaming output in exploration
+    theorem_graph_mode: bool, // whether to use theorem graph mode
 }
 
 impl ResearchSessionConfig {
@@ -42,6 +46,7 @@ impl ResearchSessionConfig {
     pub fn resume(mut self, resume: bool) -> Self {self.resume = resume; self}
     pub fn reformat(mut self, reformat: bool) -> Self {self.reformat = reformat; self}
     pub fn streaming(mut self, streaming: bool) -> Self {self.streaming = streaming; self}
+    pub fn theorem_graph_mode(mut self, tgm: bool) -> Self {self.theorem_graph_mode = tgm; self}
     pub fn set_current_steps(&mut self, steps: u32) -> &Self {self.currect_steps = steps; self}
     pub fn set_problem(&mut self, problem: impl Into<String>) -> &Self {self.problem = problem.into(); self}
 
@@ -63,7 +68,7 @@ pub struct ResearchSession {
 
 impl ResearchSession {
     pub fn new(config: ResearchSessionConfig) -> Self {
-        info!("Initialized a ResearchSession with config: {:#?}", serde_json::to_string(&config).unwrap());
+        info!("Initialized a ResearchSession with config: {:#?}", config);
         let explorer = Explorer::new()
             .model(&config.proof_model)
             .streaming(config.streaming);
@@ -112,15 +117,132 @@ impl ResearchSession {
         Ok(())
     }
 
+    pub async fn review_mems(&mut self, ids: &Vec<usize>) -> Option<Vec<Option<String>>> {
+        info!("Start verifying proof path with {} nodes", ids.len());
+        let mut tasks: JoinSet<Option<String>> = JoinSet::new();
+        let mut res: Vec<Option<String>> = Vec::with_capacity(ids.len());
+        for i in ids {
+            let mut reviewer = Reviewer::new()
+                .model(&self.config.eval_model)
+                .reviews(self.config.reviews)
+                .streaming(false);
+            let memblock = &self.memory.memory[*i];
+            let comment = String::from(memblock.get_comment());
+            let num_reviews = memblock.get_reviews();
+            if let Some(context) = self.memory.format_deps(*i, false, false) {
+                reviewer.set_context(context);
+            }
+            reviewer.set_conjecture(&memblock.content);
+            reviewer.set_proof(&memblock.proof);
+            let arc_reviewer = Arc::new(reviewer);
+            tasks.spawn(async move {
+                if num_reviews >= MAX_REVIEWS_PER_NODE {
+                    return None;
+                }
+                if !comment.is_empty() {
+                    return Some(comment);
+                }
+                return arc_reviewer.pverify().await;
+            });
+        }
+        while let Ok(review) = tasks.join_next().await? {
+            if let Some(r) = review {
+                res.push(Some(r));
+            } else {
+                res.push(None);
+            }
+        }
+        Some(res)
+    }
+
+    pub async fn backtrace_review_from(&mut self, id: usize) -> Result<bool, Box<dyn std::error::Error>> {
+        // Obtain proof path ids in decreasing order
+        let proof_path_ids = self.memory.get_proof_path_ids(id, true);
+        info!("Start reviewing the proof path towards memory ID: {}, with {} nodes", id, proof_path_ids.len());
+        let reviews = self.review_mems(&proof_path_ids).await.unwrap_or_default();
+        // The correctness of this proofpath, default to true and changed to false once a flaw is
+        // found in the proof path.
+        let mut path_correctness = true;
+        // iterate through proof path in the derivation order
+        for (i, rev) in proof_path_ids.iter().zip(reviews.iter()).rev() {
+            let mem = &mut self.memory.memory[*i];
+            mem.set_reviews(mem.get_reviews() + self.config.reviews);
+            if let Some(r) = rev {
+                // Found a flaw in one memblock
+                info!("One flaw was found when reviewing memory ID: {}", i);
+                path_correctness = false;
+                mem.set_comment(r);
+            }
+            mem.set_solved(path_correctness);
+        }
+        Ok(path_correctness)
+    }
+
+    pub async fn backtrace_refine_from(&mut self, id: usize) -> Result<(), Box<dyn std::error::Error>> {
+        let proof_path_ids = self.memory.get_proof_path_ids(id, true);
+        info!("Start refining the proof path towards memory ID: {}, with {} nodes", id, proof_path_ids.len());
+        let mut tasks: JoinSet<(usize, String)> = JoinSet::new();
+        for i in proof_path_ids {
+            let memblock = &self.memory.memory[i];
+            if memblock.is_solved() {
+                continue;
+            }
+            let review = memblock.get_comment();
+            if review.is_empty() {
+                continue;
+            }
+            let mut refiner = Refiner::new().model(&self.config.proof_model).streaming(false);
+            if let Some(context) = self.memory.format_deps(i, false, false) {
+                refiner.set_context(context);
+            }
+            refiner.set_conjecture(&memblock.content);
+            refiner.set_proof(&memblock.proof);
+            refiner.set_review(review);
+            tasks.spawn(async move {
+                // refiner will return a empty string on error
+                (i, refiner._process().await.unwrap_or_default())
+            });
+        }
+        while let Some(res) = tasks.join_next().await {
+            if let Ok((memid, reproof)) = res {
+                let memblock = &mut self.memory.memory[memid];
+                info!("One refinement complete for conjecture: {}.", memblock.content);
+                if !reproof.is_empty() {
+                    if let Some(judgement) = find_box(&reproof) {
+                        if judgement == "false" {
+                            if let Some(n_conj) = extract_component(&reproof, "conjecture") {
+                                memblock.content = n_conj;
+                            }
+                        }
+                        if let Some(n_proof) = extract_component(&reproof, "proof") {
+                            memblock.proof = n_proof;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn update_memory(&mut self, nmemory: MemoryBlock) {
         if let Ok(mem_str) = serde_json::to_string_pretty(&nmemory) {
             info!("Session Memory Updated with: {}", mem_str);
         }
         self.memory.update(nmemory);
-        if let Some(context) = self.memory.format_all() {
+        if let Some(context) = self.memory.format_all(true) {
             self.explorer.set_context(&context);
             self.reviewer.set_context(&context);
             self.refiner.set_context(&context);
+        }
+    }
+
+    fn update_memory_graph(&mut self, nmemory: MemoryBlock) {
+        if let Ok(mem_str) = serde_json::to_string_pretty(&nmemory) {
+            info!("Session Memory Graph Updated with: {}", mem_str);
+        }
+        self.memory.update(nmemory);
+        if let Some(context) = self.memory.format_all(true) {
+            self.explorer.set_context(&context);
         }
     }
 
@@ -209,17 +331,66 @@ impl ResearchSession {
         }
         let md_path = self.config.logdir.as_path().join("all_memory.md");
         let pp_path = self.config.logdir.as_path().join("proof_path.md");
-        if let Some(memory_content) = self.memory.format_all_with_proof() {
+        if let Some(memory_content) = self.memory.format_all_with_proof(false) {
             info!("Saving memory contents to path: {:#?}", md_path);
             let contents = format!("# Explore Trajectory of AIM\n\n{}", memory_content);
             fs::write(md_path, contents)?;
         }
-        if let Some(proof_path_content) = self.memory.format_deps(self.memory.memory.len() - 1, true) {
+        if let Some(proof_path_content) = self.memory.format_deps(self.memory.memory.len() - 1, true, true) {
             info!("Saving proof paths to path: {:#?}", pp_path);
             let contents = format!("# Complete Proof Path of AIM\n\n{}", proof_path_content);
             fs::write(pp_path, contents)?;
         }
         Ok(())
+    }
+
+    pub async fn graph_step(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
+        let raw_exploration = self.explorer._process().await?;
+        let conj = extract_component(&raw_exploration, "conjecture").unwrap_or_default();
+        let proof = extract_component(&raw_exploration, "proof").unwrap_or_default();
+        let final_proof = extract_component(&raw_exploration, "final_proof").unwrap_or_default();
+        let deps = extract_component(&raw_exploration, "dependency").unwrap_or_default();
+        if (conj.is_empty() || proof.is_empty() || deps.is_empty()) && (final_proof.is_empty() || deps.is_empty()) {
+            error!("Incomplete response format: conjecture {}; proof {}; dependency {}; final_proof: {};",
+                !conj.is_empty(), !proof.is_empty(), !deps.is_empty(), !final_proof.is_empty());
+            return Ok(false);
+        }
+        if final_proof.is_empty() {
+            info!("Collected one new conjecture: {}", &conj);
+            self.update_memory_graph(MemoryBlock::new()
+                .memtype("lemma")
+                .content(&conj)
+                .proof(&proof)
+                .deps(serde_json::from_str::<Vec<usize>>(&deps).unwrap_or_default())
+                .solved(false)
+                .reviews(0)
+            );
+        } else {
+            info!("Collected the final proof of this problem.");
+            self.update_memory_graph(MemoryBlock::new()
+                .memtype("theorem")
+                .content(&self.config.problem)
+                .proof(&final_proof)
+                .deps(serde_json::from_str::<Vec<usize>>(&deps).unwrap_or_default())
+                .solved(false)
+                .reviews(0)
+            );
+        }
+        let memid = self.memory.memory.len() - 1;
+        for i in 0..self.config.iterations {
+            info!("Starting the {}-th iteration", i);
+            if self.backtrace_review_from(memid).await? {
+                break;
+            } else {
+                info!("Some flaws were found in this proof path, starting {}-th iteration", i);
+                self.backtrace_refine_from(memid).await?;
+            }
+        }
+
+        if self.memory.memory[memid].is_solved() && self.memory.memory[memid].memtype == "theorem" {
+            return Ok(true);
+        }
+        return Ok(false);
     }
 
     pub async fn step(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
@@ -364,7 +535,11 @@ impl Session for ResearchSession {
         for i in 0..self.config.steps {
             info!("Starting Exploration Step: {}", i);
             self.config.set_current_steps(i);
-            let solved = self.step().await?;
+            let solved = if self.config.theorem_graph_mode {
+                self.graph_step().await?
+            } else {
+                self.step().await?
+            };
             self.save_memory().await?;
             pb.inc(1);
             if solved {break;}
