@@ -100,6 +100,7 @@ impl ResearchSession {
         self.memory.update(MemoryBlock::new()
             .memtype("context")
             .content(context)
+            .solved(true)
         );
         Ok(())
     }
@@ -120,14 +121,15 @@ impl ResearchSession {
     pub async fn review_mems(&mut self, ids: &Vec<usize>) -> Option<Vec<Option<String>>> {
         info!("Start verifying proof path with {} nodes", ids.len());
         let mut tasks: JoinSet<Option<String>> = JoinSet::new();
-        let mut res: Vec<Option<String>> = Vec::with_capacity(ids.len());
+        let mut res: Vec<Option<String>> = Vec::new();
         for i in ids {
             let mut reviewer = Reviewer::new()
                 .model(&self.config.eval_model)
                 .reviews(self.config.reviews)
                 .streaming(false);
             let memblock = &self.memory.memory[*i];
-            let comment = String::from(memblock.get_comment());
+            let comment = memblock.get_comment().to_string();
+            let memtype = memblock.memtype.to_string();
             let num_reviews = memblock.get_reviews();
             if let Some(context) = self.memory.format_deps(*i, false, false) {
                 reviewer.set_context(context);
@@ -136,7 +138,7 @@ impl ResearchSession {
             reviewer.set_proof(&memblock.proof);
             let arc_reviewer = Arc::new(reviewer);
             tasks.spawn(async move {
-                if num_reviews >= MAX_REVIEWS_PER_NODE {
+                if memtype == "context" || num_reviews >= MAX_REVIEWS_PER_NODE {
                     return None;
                 }
                 if !comment.is_empty() {
@@ -145,11 +147,19 @@ impl ResearchSession {
                 return arc_reviewer.pverify().await;
             });
         }
-        while let Ok(review) = tasks.join_next().await? {
-            if let Some(r) = review {
-                res.push(Some(r));
-            } else {
-                res.push(None);
+        while let Some(task_result) = tasks.join_next().await {
+            match task_result {
+                Ok(review) => {
+                    if let Some(r) = review {
+                        res.push(Some(r));
+                    } else {
+                        res.push(None);
+                    }
+                },
+                Err(e) => {
+                    error!("Task failed: {:#?}", e);
+                    res.push(None);
+                }
             }
         }
         Some(res)
@@ -158,29 +168,34 @@ impl ResearchSession {
     pub async fn backtrace_review_from(&mut self, id: usize) -> Result<bool, Box<dyn std::error::Error>> {
         // Obtain proof path ids in decreasing order
         let proof_path_ids = self.memory.get_proof_path_ids(id, true);
-        info!("Start reviewing the proof path towards memory ID: {}, with {} nodes", id, proof_path_ids.len());
+        info!("Start reviewing the proof path: {:?}", &proof_path_ids);
         let reviews = self.review_mems(&proof_path_ids).await.unwrap_or_default();
+        info!("Obtained {} reviews in the proof path", reviews.len());
         // The correctness of this proofpath, default to true and changed to false once a flaw is
         // found in the proof path.
         let mut path_correctness = true;
         // iterate through proof path in the derivation order
-        for (i, rev) in proof_path_ids.iter().zip(reviews.iter()).rev() {
+        for (i, rev) in proof_path_ids.iter().zip(reviews.iter()) {
             let mem = &mut self.memory.memory[*i];
-            mem.set_reviews(mem.get_reviews() + self.config.reviews);
+            if mem.memtype == "context" {
+                continue;
+            } // eliminate the given context
+            mem.set_reviews((mem.get_reviews() + self.config.reviews).min(MAX_REVIEWS_PER_NODE));
             if let Some(r) = rev {
                 // Found a flaw in one memblock
-                info!("One flaw was found when reviewing memory ID: {}", i);
                 path_correctness = false;
                 mem.set_comment(r);
+                mem.set_reviews(0);
             }
             mem.set_solved(path_correctness);
+            debug!("Modified memblock: {:#?}", &mem);
         }
         Ok(path_correctness)
     }
 
     pub async fn backtrace_refine_from(&mut self, id: usize) -> Result<(), Box<dyn std::error::Error>> {
         let proof_path_ids = self.memory.get_proof_path_ids(id, true);
-        info!("Start refining the proof path towards memory ID: {}, with {} nodes", id, proof_path_ids.len());
+        info!("Start refining the proof path: {:?}", &proof_path_ids);
         let mut tasks: JoinSet<(usize, String)> = JoinSet::new();
         for i in proof_path_ids {
             let memblock = &self.memory.memory[i];
@@ -208,6 +223,7 @@ impl ResearchSession {
                 let memblock = &mut self.memory.memory[memid];
                 info!("One refinement complete for conjecture: {}.", memblock.content);
                 if !reproof.is_empty() {
+                    memblock.set_comment(String::new());
                     if let Some(judgement) = find_box(&reproof) {
                         if judgement == "false" {
                             if let Some(n_conj) = extract_component(&reproof, "conjecture") {
@@ -241,9 +257,6 @@ impl ResearchSession {
             info!("Session Memory Graph Updated with: {}", mem_str);
         }
         self.memory.update(nmemory);
-        if let Some(context) = self.memory.format_all(true) {
-            self.explorer.set_context(&context);
-        }
     }
 
     async fn save_memory(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -345,6 +358,9 @@ impl ResearchSession {
     }
 
     pub async fn graph_step(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
+        if let Some(context) = self.memory.format_all(true) {
+            self.explorer.set_context(&context);
+        }
         let raw_exploration = self.explorer._process().await?;
         let conj = extract_component(&raw_exploration, "conjecture").unwrap_or_default();
         let proof = extract_component(&raw_exploration, "proof").unwrap_or_default();
@@ -377,12 +393,13 @@ impl ResearchSession {
             );
         }
         let memid = self.memory.memory.len() - 1;
-        for i in 0..self.config.iterations {
+        for i in 0..self.config.iterations+1 {
             info!("Starting the {}-th iteration", i);
             if self.backtrace_review_from(memid).await? {
+                info!("backtrace review ended and the proof path is correct.");
                 break;
-            } else {
-                info!("Some flaws were found in this proof path, starting {}-th iteration", i);
+            } else if i < self.config.iterations {
+                info!("Some flaws were found in this proof path");
                 self.backtrace_refine_from(memid).await?;
             }
         }

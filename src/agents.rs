@@ -72,7 +72,7 @@ impl Memory {
     }
     pub fn get_proof_path_ids(&self, id: usize, include_end_node: bool) -> Vec<usize> {
         // Format the given memory ID and all dependencies of it
-        // ids are sorted in the decreasing order
+        // ids are sorted in the increasing order
         let mut dep_ids: Vec<usize> = vec![id];
         let mut retrieve_id: usize = 0;
 
@@ -89,6 +89,15 @@ impl Memory {
         if !include_end_node {
             dep_ids.remove(0);
         }
+
+        // add the context information in memory id: 0 if exists
+        if let Some(memblock) = &self.memory.get(0) {
+            if !dep_ids.contains(&0) && memblock.memtype == "context" {
+                dep_ids.push(0);
+            }
+        }
+
+        dep_ids.sort_unstable();
         return dep_ids;
     }
 
@@ -191,7 +200,6 @@ impl LMClient {
     }
 
     async fn comp(&self, prompt: &str, model: &str, stream_output: bool) -> Result<String, Box<dyn std::error::Error>> {
-        debug!("Running language model completion with prompt {}", prompt);
         let request_body = json!({
             "model": model,
             "messages": [
@@ -406,11 +414,14 @@ impl Reviewer {
             if let Some(r) = review {
                 debug!("Collected one review: {}", &r);
                 if find_box(&r)? == "invalid" {
+                    info!("One reviewer found a flaw in the proof: {}", &r);
                     tasks.shutdown().await;
+                    pb.finish();
                     return Some(r);
                 }
             }
         }
+        pb.finish();
         return None;
     }
 }
