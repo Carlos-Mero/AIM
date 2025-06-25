@@ -534,7 +534,7 @@ impl Session for ResearchSession {
             self.resume()?;
             // If a theorem is already found in memory, aim will not continue exploring.
             for mem in &self.memory.memory {
-                if mem.memtype == "theorem" {
+                if mem.memtype == "theorem" && mem.is_solved() {
                     info!("A final theorem already exists in history memory.");
                     info!("Start reformatting memory and canceling exploration.");
                     self.format_to_markdown().await?;
