@@ -2,10 +2,12 @@ mod agents;
 mod aim;
 mod sessions;
 mod utils;
+mod server;
 use crate::aim::AIM;
 use crate::sessions::ResearchSessionConfig;
 
 use env_logger;
+use log::{error};
 
 use clap::Parser;
 
@@ -53,6 +55,10 @@ struct Cli {
     /// Disable theorem graph mode
     #[arg(long = "no_tgm", action = clap::ArgAction::SetFalse, default_value_t = true)]
     theorem_graph_mode: bool,
+
+    /// Running AIM as a server backend
+    #[arg(long = "server", action = clap::ArgAction::SetTrue, default_value_t = false)]
+    server: bool
 }
 
 #[tokio::main]
@@ -78,8 +84,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .streaming(cli.streaming)
             .theorem_graph_mode(cli.theorem_graph_mode);
         let _ = aim.run_session(config).await;
+    } else if cli.server {
+        let _ = aim.runserver().await;
     } else {
-        let _ = aim.run_tui().await;
+        error!("Unknown running configs, existing.");
     }
 
     Ok(())
