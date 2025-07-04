@@ -1,10 +1,9 @@
 "use client";
 
-"use client";
 import React, { useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import NavBar from '@/components/NavBar';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { FaPlus } from 'react-icons/fa';
 
 interface Project {
@@ -20,7 +19,6 @@ const HomePage: React.FC = () => {
   // Get current user name from auth context
   const { fullName } = useAuth();
   const userName = fullName ?? '访客';
-  const router = useRouter();
   // useEffect(() => {
   //   if (!token) router.push('/login');
   // }, [token]);
@@ -54,10 +52,6 @@ const HomePage: React.FC = () => {
     }
   ]);
 
-  // 点击跳转到新建项目页面
-  const handleCreateProject = () => {
-    router.push('/new-project');
-  };
 
   // 过滤项目函数
   const filteredProjects = projects.filter(project => 
@@ -75,12 +69,13 @@ const HomePage: React.FC = () => {
             <h1 className="text-3xl font-bold text-gray-800">您好，{userName.split(' ')[0]}</h1>
             <p className="mt-2 text-gray-600">探索您的数学研究项目</p>
           </div>
-          <button
-            onClick={handleCreateProject}
-            className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white py-3 px-6 rounded-lg font-medium hover:opacity-90 transition-opacity shadow-md flex items-center"
-          >
-            <FaPlus className="mr-2" /> 新建项目
-          </button>
+          <Link href="/new-project">
+            <button
+              className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white py-3 px-6 rounded-lg font-medium hover:opacity-90 transition-opacity shadow-md flex items-center"
+            >
+              <FaPlus className="mr-2" /> 新建项目
+            </button>
+          </Link>
         </div>
 
         {/* 项目列表 */}
@@ -99,33 +94,33 @@ const HomePage: React.FC = () => {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredProjects.map((project) => (
-                <div 
-                  key={project.id} 
-                  className="bg-white rounded-2xl shadow-md overflow-hidden hover:shadow-lg transition-shadow cursor-pointer"
-                >
-                  <div className="p-6">
-                    <div className="flex justify-between items-start mb-3">
-                      <h3 className="text-xl font-semibold text-gray-800 truncate max-w-[70%]">{project.title}</h3>
-                      <span className="text-xs text-gray-500">{project.createdAt}</span>
-                    </div>
-                    <p className="text-gray-600 mb-4 h-14 line-clamp-2">{project.description}</p>
-                    
-                    <div className="flex justify-between text-sm text-gray-500">
-                      <div>
-                        <span className="font-medium">引理: </span>
-                        <span className="text-blue-600 font-bold">{project.lemmasCount}</span>
-                      </div>
-                      <span>{project.lastActive}</span>
-                    </div>
-                  </div>
-                  <div className="bg-gray-50 px-6 py-3 border-t border-gray-100">
-                    <button className="text-blue-600 hover:text-blue-800 font-medium w-full text-left">
-                      查看项目详情
-                    </button>
-                  </div>
+          {filteredProjects.map((project) => (
+            <Link
+              href={`/project/${project.id}`}
+              key={project.id}
+              className="block bg-white rounded-2xl shadow-md overflow-hidden hover:shadow-lg transition-shadow cursor-pointer"
+            >
+              <div className="p-6">
+                <div className="flex justify-between items-start mb-3">
+                  <h3 className="text-xl font-semibold text-gray-800 truncate max-w-[70%]">{project.title}</h3>
+                  <span className="text-xs text-gray-500">{project.createdAt}</span>
                 </div>
-              ))}
+                <p className="text-gray-600 mb-4 h-14 line-clamp-2">{project.description}</p>
+                <div className="flex justify-between text-sm text-gray-500">
+                  <div>
+                    <span className="font-medium">引理: </span>
+                    <span className="text-blue-600 font-bold">{project.lemmasCount}</span>
+                  </div>
+                  <span>{project.lastActive}</span>
+                </div>
+              </div>
+              <div className="bg-gray-50 px-6 py-3 border-t border-gray-100">
+                <span className="text-blue-600 hover:text-blue-800 font-medium">
+                  查看项目详情
+                </span>
+              </div>
+            </Link>
+          ))}
             </div>
           )}
         </div>

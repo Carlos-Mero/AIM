@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from 'react';
+import TermsModal from '../../components/TermsModal';
 import { useRouter } from 'next/navigation';
 import { FaUser, FaEnvelope, FaLock, FaUniversity, FaKey } from 'react-icons/fa';
 import Link from 'next/link';
@@ -22,6 +23,8 @@ const Signup: React.FC = () => {
 
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
+  const [showTerms, setShowTerms] = useState(false);
+  const [showPolicy, setShowPolicy] = useState(false);
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -192,7 +195,22 @@ const Signup: React.FC = () => {
                 required
               />
               <label htmlFor="terms" className="ml-2 block text-sm text-gray-700">
-                我同意 AI Mathematician 的 <a href="#" className="text-blue-600 hover:underline">服务条款</a> 和 <a href="#" className="text-blue-600 hover:underline">隐私政策</a>
+                我同意 AI Mathematician 的 
+                <a
+                  href="#"
+                  onClick={e => { e.preventDefault(); e.stopPropagation(); setShowTerms(true); }}
+                  className="text-blue-600 hover:underline"
+                >
+                  服务条款
+                </a>
+                {' '}和{' '}
+                <a
+                  href="#"
+                  onClick={e => { e.preventDefault(); e.stopPropagation(); setShowPolicy(true); }}
+                  className="text-blue-600 hover:underline"
+                >
+                  隐私政策
+                </a>
               </label>
             </div>
           </div>
@@ -211,6 +229,20 @@ const Signup: React.FC = () => {
             </Link>
           </p>
         </form>
+        <TermsModal
+          isOpen={showTerms}
+          onClose={() => setShowTerms(false)}
+          title="服务条款"
+        >
+          <p>此处填写服务条款内容。</p>
+        </TermsModal>
+        <TermsModal
+          isOpen={showPolicy}
+          onClose={() => setShowPolicy(false)}
+          title="隐私政策"
+        >
+          <p>此处填写隐私政策内容。</p>
+        </TermsModal>
       </div>
     </div>
   );

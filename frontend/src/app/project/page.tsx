@@ -3,7 +3,8 @@
 import React, { useState } from 'react';
 import { BlockMath, InlineMath } from 'react-katex';
 import 'katex/dist/katex.min.css';
-import { FaList, FaPlus, FaSearch, FaInfoCircle } from 'react-icons/fa';
+import NavBar from '@/components/NavBar';
+import { FaSearch, FaPlus, FaInfoCircle } from 'react-icons/fa';
 import LemmaList from '@/components/LemmaList';
 import LemmaDetail from '@/components/LemmaDetail';
 import { useParams } from 'next/navigation';
@@ -153,45 +154,9 @@ const ProjectDetailPage: React.FC = () => {
     l.title.includes(filter) || l.statement.includes(filter)
   );
   return (
-    <>
-      <div className="flex flex-col min-h-screen bg-gray-50">
-        {/* 顶部导航栏 */}
-        <header className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white shadow">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex justify-between items-center h-16">
-              <div className="flex items-center space-x-3">
-                <div className="bg-blue-500 w-8 h-8 rounded-full flex items-center justify-center">
-                  <FaList />
-                </div>
-                <span className="text-xl font-bold">AI Mathematician</span>
-              </div>
-
-              <div className="flex-1 max-w-xl mx-4">
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <FaSearch className="text-gray-400" />
-                  </div>
-                  <input
-                    type="text"
-                    className="block w-full pl-10 pr-3 py-2 text-gray-900 bg-white rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="搜索引理..."
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center space-x-4">
-                <button className="text-blue-200 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
-                  帮助
-                </button>
-                <button className="text-blue-200 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center">
-                  退出
-                </button>
-              </div>
-            </div>
-          </div>
-        </header>
-
-        <main className="flex-1 container mx-auto px-4 py-6">
+    <div className="flex flex-col min-h-screen bg-gray-50">
+      <NavBar />
+      <main className="flex-1 container mx-auto px-4 py-6">
           {/* 项目信息 */}
           <div className="bg-white rounded-2xl shadow p-6 mb-6">
             <h1 className="text-2xl font-bold text-gray-800">{project.title}</h1>
@@ -262,7 +227,6 @@ const ProjectDetailPage: React.FC = () => {
           </div>
         </main>
       </div>
-    </>
   );
 };
 

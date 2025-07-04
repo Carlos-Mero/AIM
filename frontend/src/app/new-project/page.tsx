@@ -10,9 +10,9 @@ export default function NewProjectPage() {
   const [context, setContext] = useState<string>('');
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
   // Advanced parameters matching ResearchSessionConfig
-  const [proofModel, setProofModel] = useState<string>('deepseek-r1');
-  const [evalModel, setEvalModel] = useState<string>('deepseek-r1');
-  const [reformModel, setReformModel] = useState<string>('deepseek-r1');
+  const [proofModel, setProofModel] = useState<string>('o4-mini');
+  const [evalModel, setEvalModel] = useState<string>('o4-mini');
+  const [reformModel, setReformModel] = useState<string>('o4-mini');
   const [steps, setSteps] = useState<number>(24);
   const [reviews, setReviews] = useState<number>(3);
   const [iterations, setIterations] = useState<number>(4);
@@ -115,11 +115,11 @@ export default function NewProjectPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm">Steps (1–100)</label>
+                  <label className="block text-sm">Steps (1–40)</label>
                   <input
                     type="number"
                     value={steps}
-                    min={1} max={100}
+                    min={1} max={40}
                     onChange={e => setSteps(+e.target.value)}
                     className="w-full border rounded p-1"
                   />
