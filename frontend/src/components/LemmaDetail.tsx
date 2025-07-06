@@ -1,21 +1,10 @@
 "use client";
 
 import React from 'react';
+import Lemma from '@/interfaces/Lemma';
 import { BlockMath, InlineMath } from 'react-katex';
 import 'katex/dist/katex.min.css';
 import { FaCheck, FaHourglassHalf, FaTimes, FaEdit } from 'react-icons/fa';
-
-interface Lemma {
-  id: string;
-  title: string;
-  statement: string;
-  proof: string;
-  status: 'pending' | 'in_progress' | 'proved' | 'invalid';
-  difficulty: 'easy' | 'medium' | 'hard';
-  createdBy: string;
-  createdAt: string;
-  lastUpdated: string;
-}
 
 interface LemmaDetailProps {
   lemma: Lemma;
@@ -38,7 +27,7 @@ const LemmaDetail: React.FC<LemmaDetailProps> = ({ lemma }) => {
         }
       }
       // 段落内容，支持 $$..$$、\[..\] 块级和 $..$ 行内公式
-      const tokens = para.split(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\$[^$\n]+\$)/g).filter(Boolean);
+      const tokens = para.split(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$[^$\n]+\$)/g).filter(Boolean);
       // construct paragraphs & blockmath without nesting divs in <p>
       const elems: React.ReactNode[] = [];
       let buf: React.ReactNode[] = [];
@@ -62,6 +51,8 @@ const LemmaDetail: React.FC<LemmaDetailProps> = ({ lemma }) => {
               <BlockMath math={expr} />
             </div>
           );
+        } else if (t.startsWith('\\(') && t.endsWith('\\)')) {
+          buf.push(<InlineMath key={`pf-inline-paren-${idx}-${i}`} math={t.slice(2, -2).trim()} />);
         } else if (t.startsWith('$') && t.endsWith('$')) {
           buf.push(<InlineMath key={`pf-inline-${idx}-${i}`} math={t.slice(1, -1).trim()} />);
         } else {
@@ -86,14 +77,55 @@ const LemmaDetail: React.FC<LemmaDetailProps> = ({ lemma }) => {
     }
   };
 
-  const getDifficultyText = () => {
-    switch (lemma.difficulty) {
-      case 'easy': return '简单';
-      case 'medium': return '中等';
-      default: return '困难';
-    }
+  // importance derived from reviews or if title contains 'theorem'
+  const isTheorem = () => lemma.title.toLowerCase().includes('theorem');
+  // 次要 (<12), 重要 (12–23), 关键 (>=24 or theorem)
+  const getImportanceText = () => {
+    if (isTheorem() || lemma.reviews >= 24) return '关键';
+    if (lemma.reviews >= 12) return '重要';
+    return '次要';
+  };
+  const getImportanceColor = () => {
+    if (isTheorem() || lemma.reviews >= 24) return 'text-red-600 bg-red-100';
+    if (lemma.reviews >= 12) return 'text-yellow-600 bg-yellow-100';
+    return 'text-gray-600 bg-gray-100';
   };
 
+  // render comment content with KaTeX support
+  const renderCommentContent = () => {
+    return lemma.comment.split(/\n{2,}/).flatMap((para, pidx) => {
+      const tokens = para.split(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$[^$\n]+\$)/g).filter(Boolean);
+      let buffer: React.ReactNode[] = [];
+      const elems: React.ReactNode[] = [];
+      const flush = () => {
+        if (buffer.length) {
+          elems.push(
+            <p key={`cmt-p-${pidx}-${elems.length}`} className="mb-2 text-gray-700">
+              {buffer.map((n, i) => <React.Fragment key={i}>{n}</React.Fragment>)}
+            </p>
+          ); buffer = [];
+        }
+      };
+      tokens.forEach((tok, tidx) => {
+        const t = tok.trim();
+        if ((t.startsWith('$$') && t.endsWith('$$')) || (t.startsWith('\\[') && t.endsWith('\\]'))) {
+          flush(); const expr = t.slice(t.startsWith('$$') ? 2 : 2, - (t.endsWith('$$') ? 2 : 2)).trim();
+          elems.push(
+            <div key={`cmt-block-${pidx}-${tidx}`} className="my-2 text-center">
+              <BlockMath math={expr} />
+            </div>
+          );
+        } else if (t.startsWith('\\(') && t.endsWith('\\)')) {
+          buffer.push(<InlineMath key={`cmt-inline-paren-${pidx}-${tidx}`} math={t.slice(2, -2).trim()} />);
+        } else if (t.startsWith('$') && t.endsWith('$')) {
+          buffer.push(<InlineMath key={`cmt-inline-${pidx}-${tidx}`} math={t.slice(1, -1).trim()} />);
+        } else {
+          buffer.push(tok);
+        }
+      }); flush();
+      return elems;
+    });
+  };
   return (
     <div className="h-full">
       {/* 引理头部信息 */}
@@ -114,14 +146,17 @@ const LemmaDetail: React.FC<LemmaDetailProps> = ({ lemma }) => {
                 </span>
               </div>
               <div className="flex items-center">
-                <span className="text-gray-600 mr-2">难度:</span>
-                <span className="font-medium text-gray-600">
-                  {getDifficultyText()}
-                </span>
+                <span className="text-gray-600 mr-2">重要性:</span>
+                <span className={`px-2 py-1 rounded-full ${getImportanceColor()}`}>{getImportanceText()}</span>
+              </div>
+              {/* 显示评审次数和依赖关系 */}
+              <div className="flex items-center">
+                <span className="text-gray-600 mr-2">评审次数:</span>
+                <span className="font-medium text-gray-600">{lemma.reviews}</span>
               </div>
               <div className="flex items-center">
-                <span className="text-gray-600 mr-2">创建人:</span>
-                <span className="font-medium text-gray-600">{lemma.createdBy}</span>
+                <span className="text-gray-600 mr-2">依赖：</span>
+                <span className="font-medium text-gray-600">{lemma.deps.join(', ') || '无'}</span>
               </div>
             </div>
           </div>
@@ -135,7 +170,8 @@ const LemmaDetail: React.FC<LemmaDetailProps> = ({ lemma }) => {
         <div className="bg-white rounded-lg text-gray-600 p-4 shadow-inner border border-gray-200 mt-4 prose">
           <h3 className="text-lg font-semibold mb-3 text-blue-700">引理陈述:</h3>
           {lemma.statement.split(/\n{2,}/).flatMap((para, pidx) => {
-            const tokens = para.split(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\$[^$\n]+\$)/g).filter(Boolean);
+            // 支持 $$..$$, \[..\], \(..\) 块/行内和 $..$ 行内公式
+            const tokens = para.split(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$[^$\n]+\$)/g).filter(Boolean);
             let buffer: React.ReactNode[] = [];
             const elems: React.ReactNode[] = [];
             const flush = () => {
@@ -160,6 +196,8 @@ const LemmaDetail: React.FC<LemmaDetailProps> = ({ lemma }) => {
                     <BlockMath math={expr} />
                   </div>
                 );
+              } else if (t.startsWith('\\(') && t.endsWith('\\)')) {
+                buffer.push(<InlineMath key={`stmt-inline-paren-${pidx}-${tidx}`} math={t.slice(2, -2).trim()} />);
               } else if (t.startsWith('$') && t.endsWith('$')) {
                 const expr = t.slice(1, -1).trim();
                 buffer.push(<InlineMath key={`stmt-inline-${pidx}-${tidx}`} math={expr} />);
@@ -173,16 +211,24 @@ const LemmaDetail: React.FC<LemmaDetailProps> = ({ lemma }) => {
         </div>
       </div>
       
-      {/* 引理证明内容 */}
-      <div className="p-6 max-h-[calc(100vh-30rem)] overflow-y-auto">
+      {/* 引理证明内容：展示完整证明，无滚动 */}
+      <div className="p-6">
         <h3 className="text-xl font-bold mb-4 text-blue-800">证明:</h3>
         <div className="prose max-w-none text-gray-700">
           {renderProofContent()}
         </div>
       </div>
-      
+      {/* 评论内容（如果有） */}
+      {lemma.comment && (
+        <div className="p-4 bg-yellow-50 border-t border-yellow-200 text-sm text-gray-800">
+          <h4 className="font-semibold mb-2 text-yellow-800">评审评论:</h4>
+          <div className="prose max-w-none">
+            {renderCommentContent()}
+          </div>
+        </div>
+      )}
       {/* 底部元数据 */}
-      <div className="p-4 bg-gray-50 border-t border-gray-200 text-sm text-gray-500 flex justify-between">
+      <div className="pt-4 pw-4 border-t border-gray-200 text-sm text-gray-500 flex justify-between">
         <span>创建时间: {lemma.createdAt}</span>
         <span>最后更新: {lemma.lastUpdated}</span>
       </div>

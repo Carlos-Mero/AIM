@@ -17,35 +17,95 @@ const API_RETRY_DELAY: Duration = Duration::from_secs(2);
 const MAX_REQWEST_RETRIES: u8 = 7;
 const MAX_CHUNK_DECODE_RETRIES: u8 = 16;
 
-#[derive(Default, Debug, Serialize, Deserialize)]
+use chrono::{DateTime, Utc};
+
+/// Provide default timestamp when deserializing older memory entries
+fn default_datetime() -> DateTime<Utc> {
+    Utc::now()
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MemoryBlock {
     pub memtype: String,
     pub content: String,
     pub proof: String,
-
-    // Used in memory graph, Working in process
+    /// Timestamp when this memory block was created
+    #[serde(default = "default_datetime")]
+    pub created_at: DateTime<Utc>,
+    /// Timestamp when this memory block was last modified
+    #[serde(default = "default_datetime")]
+    pub updated_at: DateTime<Utc>,
+    // Used in memory graph, working in process
     solved: bool,
     reviews: u8,
     comment: String,
-    deps: Vec<usize>
+    deps: Vec<usize>,
 }
 
 impl MemoryBlock {
+    /// Create a new MemoryBlock with timestamps set to now
     pub fn new() -> Self {
-        Self::default()
+        let now = Utc::now();
+        MemoryBlock {
+            memtype: String::new(),
+            content: String::new(),
+            proof: String::new(),
+            created_at: now,
+            updated_at: now,
+            solved: false,
+            reviews: 0,
+            comment: String::new(),
+            deps: Vec::new(),
+        }
     }
-    pub fn memtype(mut self, memtype: impl Into<String>) -> Self {self.memtype = memtype.into(); self}
-    pub fn content(mut self, content: impl Into<String>) -> Self {self.content = content.into(); self}
-    pub fn proof(mut self, proof: impl Into<String>) -> Self {self.proof = proof.into(); self}
-    pub fn solved(mut self, solved: bool) -> Self {self.solved = solved; self}
-    pub fn reviews(mut self, reviews: u8) -> Self {self.reviews = reviews; self}
-    pub fn deps(mut self, deps: Vec<usize>) -> Self {self.deps = deps; self}
+    pub fn memtype(mut self, memtype: impl Into<String>) -> Self {
+        self.memtype = memtype.into();
+        self.updated_at = Utc::now();
+        self
+    }
+    pub fn content(mut self, content: impl Into<String>) -> Self {
+        self.content = content.into();
+        self.updated_at = Utc::now();
+        self
+    }
+    pub fn proof(mut self, proof: impl Into<String>) -> Self {
+        self.proof = proof.into();
+        self.updated_at = Utc::now();
+        self
+    }
+    pub fn solved(mut self, solved: bool) -> Self {
+        self.solved = solved;
+        self.updated_at = Utc::now();
+        self
+    }
+    pub fn reviews(mut self, reviews: u8) -> Self {
+        self.reviews = reviews;
+        self.updated_at = Utc::now();
+        self
+    }
+    pub fn deps(mut self, deps: Vec<usize>) -> Self {
+        self.deps = deps;
+        self.updated_at = Utc::now();
+        self
+    }
     pub fn is_solved(&self) -> bool {self.solved}
-    pub fn set_solved(&mut self, solved: bool) -> &Self {self.solved = solved; self}
+    pub fn set_solved(&mut self, solved: bool) -> &Self {
+        self.solved = solved;
+        self.updated_at = Utc::now();
+        self
+    }
     pub fn get_reviews(&self) -> u8 {self.reviews}
-    pub fn set_reviews(&mut self, reviews: u8) -> &Self {self.reviews = reviews; self}
+    pub fn set_reviews(&mut self, reviews: u8) -> &Self {
+        self.reviews = reviews;
+        self.updated_at = Utc::now();
+        self
+    }
     pub fn get_comment(&self) -> &str {&self.comment}
-    pub fn set_comment(&mut self, comment: impl Into<String>) -> &Self {self.comment = comment.into(); self}
+    pub fn set_comment(&mut self, comment: impl Into<String>) -> &Self {
+        self.comment = comment.into();
+        self.updated_at = Utc::now();
+        self
+    }
 
     pub fn _format(&self) -> String {
         format!("\\begin{{{0}}}\n{1}\n\n**DEPENDENCY**: {2:?}\n\\end{{{0}}}", &self.memtype, &self.content, &self.deps)

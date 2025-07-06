@@ -1,17 +1,6 @@
 import React, { Dispatch, SetStateAction } from 'react';
+import Lemma from '@/interfaces/Lemma';
 import { FaCircle } from 'react-icons/fa';
-
-interface Lemma {
-  id: string;
-  title: string;
-  statement: string;
-  proof: string;
-  status: 'pending' | 'in_progress' | 'proved' | 'invalid';
-  difficulty: 'easy' | 'medium' | 'hard';
-  createdBy: string;
-  createdAt: string;
-  lastUpdated: string;
-}
 
 interface LemmaListProps {
   lemmas: Lemma[];
@@ -33,13 +22,18 @@ const LemmaList: React.FC<LemmaListProps> = ({
     }
   };
   
-  const getDifficultyColor = (difficulty: string) => {
-    switch (difficulty) {
-      case 'easy': return 'bg-green-100 text-green-800';
-      case 'medium': return 'bg-yellow-100 text-yellow-800';
-      case 'hard': return 'bg-red-100 text-red-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
+  // importance based on review count or if title contains 'theorem'
+  const isTheorem = (title: string) => title.toLowerCase().includes('theorem');
+  // 次要 (<12), 重要 (12–23), 关键 (>=24 or theorem)
+  const getImportanceColor = (reviews: number, title: string) => {
+    if (isTheorem(title) || reviews >= 24) return 'bg-red-100 text-red-800';
+    if (reviews >= 12) return 'bg-yellow-100 text-yellow-800';
+    return 'bg-gray-100 text-gray-800';
+  };
+  const getImportanceText = (reviews: number, title: string) => {
+    if (isTheorem(title) || reviews >= 24) return '关键';
+    if (reviews >= 12) return '重要';
+    return '次要';
   };
 
   return (
@@ -76,11 +70,10 @@ const LemmaList: React.FC<LemmaListProps> = ({
             </p>
             
             <div className="flex justify-between items-center">
-              <span 
-                className={`text-xs px-2 py-1 rounded-full ${getDifficultyColor(lemma.difficulty)}`}
+              <span
+                className={`text-xs px-2 py-1 rounded-full ${getImportanceColor(lemma.reviews, lemma.title)}`}
               >
-                {lemma.difficulty === 'easy' ? '简单' :
-                 lemma.difficulty === 'medium' ? '中等' : '困难'}
+                {getImportanceText(lemma.reviews, lemma.title)}
               </span>
               <span className="text-xs text-gray-500">
                 {lemma.createdAt}

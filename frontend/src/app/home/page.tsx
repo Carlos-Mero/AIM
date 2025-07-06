@@ -48,7 +48,7 @@ const HomePage: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   
-  // Load projects on mount
+  // Load projects on mount and every 3 minutes
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -67,7 +67,11 @@ const HomePage: React.FC = () => {
         setLoading(false);
       }
     };
+    // initial load
     load();
+    // interval reload
+    const timer = setInterval(load, 3 * 60 * 1000);
+    return () => clearInterval(timer);
   }, []);
 
 

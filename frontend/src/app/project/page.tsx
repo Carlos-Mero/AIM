@@ -8,15 +8,23 @@ import NavBar from '@/components/NavBar';
 import { FaSearch, FaPlus, FaInfoCircle } from 'react-icons/fa';
 import LemmaList from '@/components/LemmaList';
 import LemmaDetail from '@/components/LemmaDetail';
+import Lemma from '@/interfaces/Lemma';
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 // base URL of backend API (set via NEXT_PUBLIC_API_BASE_URL in .env.local)
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 // Format ISO date to localized date string (e.g. "2023/10/19")
+// Format ISO date to date-only (e.g. "2023/10/19")
 function formatDate(iso: string) {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleDateString();
+}
+// Format ISO date to date+time string (e.g. "2023/10/19, 14:23:05")
+function formatDateTime(iso: string) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
 }
 // Compute relative "time ago" for ISO timestamp
 function timeAgo(iso: string) {
@@ -40,19 +48,17 @@ interface Project {
   context?: string;
   created_at: string;
   last_active: string;
-  memory: Array<{ memtype: string; content: string; proof: string; solved: boolean }>;
-}
-
-interface Lemma {
-  id: string;
-  title: string;
-  statement: string;
-  proof: string;
-  status: 'pending' | 'in_progress' | 'proved' | 'invalid';
-  difficulty: 'easy' | 'medium' | 'hard';
-  createdBy: string;
-  createdAt: string;
-  lastUpdated: string;
+  memory: Array<{
+    memtype: string;
+    content: string;
+    proof: string;
+    solved: boolean;
+    created_at: string;
+    updated_at: string;
+    reviews: number;
+    comment: string;
+    deps: number[];
+  }>;
 }
 
 const ProjectDetailContent: React.FC = () => {
@@ -66,16 +72,17 @@ const ProjectDetailContent: React.FC = () => {
   const [lemmas, setLemmas] = useState<Lemma[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // fetch project detail
+  // fetch and auto-reload project detail on mount and every 3 minutes
   useEffect(() => {
     if (!token || !projectId) return;
-    setLoading(true);
-    // Fetch project details from backend API
-    fetch(`${API_BASE}/api/project/${projectId}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(res => res.json())
-      .then((data: Project) => {
+    const loadDetail = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`${API_BASE}/api/project/${projectId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error(`Failed to fetch project: ${res.status}`);
+        const data: Project = await res.json();
         setProject(data);
         // map memory blocks to lemmas
         const mapped = data.memory.map((m, idx) => ({
@@ -84,20 +91,27 @@ const ProjectDetailContent: React.FC = () => {
           statement: m.content,
           proof: m.proof,
           status: m.solved ? 'proved' : 'pending',
-          difficulty: 'medium',
-          createdBy: '',
-          createdAt: '',
-          lastUpdated: ''
+          createdAt: formatDateTime(m.created_at),
+          lastUpdated: formatDateTime(m.updated_at),
+          reviews: m.reviews,
+          comment: m.comment,
+          deps: m.deps,
         } as Lemma));
         setLemmas(mapped);
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadDetail();
+    const timer = setInterval(loadDetail, 3 * 60 * 1000);
+    return () => clearInterval(timer);
   }, [projectId, token]);
   // 渲染项目描述，支持行内/块级公式
   const renderDescription = (text: string) => {
     return text.split(/\n{2,}/).flatMap((para, pidx) => {
-      const tokens = para.split(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\$[^$\n]+\$)/g).filter(Boolean);
+      const tokens = para.split(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$[^$\n]+\$)/g).filter(Boolean);
       let buf: React.ReactNode[] = [];
       const elems: React.ReactNode[] = [];
       const flush = () => {
@@ -120,6 +134,9 @@ const ProjectDetailContent: React.FC = () => {
               <BlockMath math={expr} />
             </div>
           );
+        } else if (t.startsWith('\\(') && t.endsWith('\\)')) {
+          const expr = t.slice(2, -2).trim();
+          buf.push(<InlineMath key={`desc-inline-${pidx}-${tidx}`} math={expr} />);
         } else if (t.startsWith('$') && t.endsWith('$')) {
           const expr = t.slice(1, -1).trim();
           buf.push(<InlineMath key={`desc-inline-${pidx}-${tidx}`} math={expr} />);
@@ -132,7 +149,6 @@ const ProjectDetailContent: React.FC = () => {
     });
   };
 
-  // 创建新引理（模拟）
   const handleCreateLemma = () => {
     const newLemma: Lemma = {
       id: lemmas.length,
@@ -140,16 +156,18 @@ const ProjectDetailContent: React.FC = () => {
       statement: "在此处添加引理陈述...",
       proof: "### 证明\n在此处撰写证明...",
       status: "pending",
-      difficulty: "medium",
-      createdBy: "用户创建",
-      createdAt: new Date().toISOString().split('T')[0],
-      lastUpdated: new Date().toISOString().split('T')[0]
+      // timestamps default to now
+      createdAt: new Date().toISOString(),
+      lastUpdated: new Date().toISOString(),
+      reviews: 0,
+      comment: "",
+      deps: []
     };
 
     setSelectedLemma(newLemma);
   };
 
-  const filteredLemmas = lemmas.filter(l => l.title.includes(filter) || l.statement.includes(filter));
+  const filteredLemmas = lemmas.filter(l => (l.title.includes(filter) || l.statement.includes(filter)) && !l.title.includes("context"));
   if (!token) return <p className="text-center mt-8">请先登录</p>;
   if (loading || !project) return <p className="text-center mt-8">加载中...</p>;
   return (
@@ -178,7 +196,7 @@ const ProjectDetailContent: React.FC = () => {
           {/* 主体区域：列表 & 详情 */}
           <div className="flex flex-col lg:flex-row gap-6 h-full">
             {/* 左侧：列表区 */}
-            <div className="flex flex-col lg:w-1/3 bg-white rounded-2xl shadow">
+            <div className="flex flex-col lg:w-1/3 bg-white rounded-2xl shadow lg:sticky lg:top-4 lg:h-[calc(100vh-10rem)]">
               <div className="flex items-center justify-between px-6 py-4 border-b">
                 <h2 className="text-lg font-semibold text-gray-800">引理列表 ({filteredLemmas.length})</h2>
                 <button

@@ -92,12 +92,20 @@ impl ResearchSession {
         let refiner = Refiner::new()
             .model(&config.proof_model)
             .streaming(config.streaming);
+        let mut mem = Memory::new();
+        if !config.context.is_empty() {
+            mem.update(MemoryBlock::new()
+                .memtype("context")
+                .content(&config.context)
+                .solved(true)
+            );
+        }
         ResearchSession {
             config: config,
             explorer: explorer,
             reviewer: reviewer,
             refiner: refiner,
-            memory: Memory::new(),
+            memory: mem,
         }
     }
 
