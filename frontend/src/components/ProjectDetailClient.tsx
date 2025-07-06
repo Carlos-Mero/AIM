@@ -1,15 +1,19 @@
 "use client";
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BlockMath, InlineMath } from 'react-katex';
 import 'katex/dist/katex.min.css';
 import { FaList } from 'react-icons/fa';
 import LemmaList from '@/components/LemmaList';
 import LemmaDetail from '@/components/LemmaDetail';
+import { useAuth } from '@/context/AuthContext';
+// Base URL for API calls, set via NEXT_PUBLIC_API_BASE_URL
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || '';
 
 interface Project {
   id: string;
   title: string;
   description: string;
+  context?: string;
   createdAt: string;
   lastActive: string;
 }
@@ -34,18 +38,34 @@ const ProjectDetailClient: React.FC<Props> = ({ projectId }) => {
   const [selectedLemma, setSelectedLemma] = useState<Lemma | null>(null);
   const [filter, setFilter] = useState<string>('');
 
-  const project: Project = {
-    id: projectId,
-    title: "黎曼猜想的几何解析",
-    description: `探索黎曼Zeta函数 $\\zeta(s)$ 的几何意义及其与双曲几何的联系。
+  const { token } = useAuth();
+  const [project, setProject] = useState<Project | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  useEffect(() => {
+    if (!token) return;
+    setLoading(true);
+    fetch(`${API_BASE}/api/project/${projectId}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.id) {
+          setProject({
+            id: data.id.toString(),
+            title: data.title,
+            description: data.problem,
+            context: data.context || undefined,
+            createdAt: data.created_at,
+            lastActive: data.last_active,
+          });
+        }
+      })
+      .finally(() => setLoading(false));
+  }, [projectId, token]);
 
-例如，当 $M$ 是 n 维双曲空间时，研究 $$\\zeta_M(s) = \\sum_{\\gamma} e^{-s \\ell(\\gamma)}$$ 在 $\\Re(s) > n/2$ 上的性质。`,
-    createdAt: "2023-10-15",
-    lastActive: "5小时前",
-  };
-
-  const renderDescription = () => {
-    return project.description.split(/\n{2,}/).flatMap((para, pidx) => {
+  // render markdown-like text with inline/block math
+  const renderDescription = (text: string) => {
+    return text.split(/\n{2,}/).flatMap((para, pidx) => {
       const tokens = para.split(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\$[^$\n]+\$)/g).filter(Boolean);
       let buf: React.ReactNode[] = [];
       const elems: React.ReactNode[] = [];
@@ -113,15 +133,15 @@ const ProjectDetailClient: React.FC<Props> = ({ projectId }) => {
 
   const filteredLemmas = lemmas.filter(l => l.title.includes(filter) || l.statement.includes(filter));
 
+  if (!token) return <p className="text-center mt-8">请先登录</p>;
+  if (loading || !project) return <p className="text-center mt-8">加载中...</p>;
   return (
     <div className="flex flex-col min-h-screen bg-gray-50">
-      <header className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white shadow">
-        {/* ... header code ... */}
-      </header>
+      {/* Header placeholder or logo/nav */}
       <main className="flex-1 container mx-auto px-4 py-6">
         <div className="bg-white rounded-2xl shadow p-6 mb-6">
-          <h1 className="text-2xl font-bold text-gray-800">{project.title}</h1>
-          <div className="mt-2 text-gray-600 prose">{renderDescription()}</div>
+          <h1 className="text-2xl font-bold text-gray-800">{project!.title}</h1>
+          <div className="mt-2 text-gray-600 prose">{renderDescription(project!.description)}</div>
         </div>
         <div className="flex">
           <div className="w-1/3 pr-4">

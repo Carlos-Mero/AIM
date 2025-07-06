@@ -4,9 +4,13 @@ use actix_cors::Cors;
 use bcrypt::{hash, verify, DEFAULT_COST};
 use chrono::Utc;
 use sea_orm::{Database, DatabaseConnection, Statement, EntityTrait, QueryFilter, ColumnTrait, ActiveModelTrait, Set, ConnectionTrait, DbBackend};
-use serde::{Deserialize, Serialize};
+use actix_web::web::Path;
+use serde::{Serialize};
 use crate::server::entity::user::{Entity as User, ActiveModel as UserActiveModel, Column as UserColumn};
 use jsonwebtoken::{encode, decode, EncodingKey, DecodingKey, Header, Algorithm, Validation};
+use crate::sessions::{ResearchSession, ResearchSessionConfig, Session};
+use log::{info, error};
+use serde::Deserialize;
 
 /// JWT claims
 #[derive(Debug, Serialize, Deserialize)]
@@ -46,6 +50,24 @@ pub async fn run() -> std::io::Result<()> {
     db.execute(Statement::from_string(DbBackend::Sqlite, create_tbl.to_owned()))
         .await
         .expect("Failed to create users table");
+    // Ensure projects table exists (for listing projects)
+    let create_projects = r#"
+        CREATE TABLE IF NOT EXISTS projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            problem TEXT NOT NULL,
+            context TEXT,
+            config TEXT NOT NULL,
+            memory TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            last_active TEXT NOT NULL,
+            lemmas_count INTEGER NOT NULL
+        );
+    "#;
+    db.execute(Statement::from_string(DbBackend::Sqlite, create_projects.to_owned()))
+        .await
+        .expect("Failed to create projects table");
     HttpServer::new(move || {
     // CORS config
     let cors = Cors::default()
@@ -64,6 +86,10 @@ pub async fn run() -> std::io::Result<()> {
                     .route("/login", web::post().to(handle_login))
                     .route("/logout", web::post().to(handle_logout))
                     .route("/me", web::get().to(handle_me))
+                    // Create a new research project (starts a session)
+                    .route("/project", web::post().to(handle_new_project))
+                    .route("/project/{id}", web::get().to(handle_get_project))
+                    .route("/projects", web::get().to(handle_list_projects))
             )
             // Static assets for SPA (responds to GET/HEAD only)
             .service(
@@ -216,5 +242,193 @@ async fn handle_me(
         Ok(Some(user)) => HttpResponse::Ok().json(MeResponse { success: true, message: "OK".into(), full_name: Some(user.full_name) }),
         Ok(None) => HttpResponse::Unauthorized().json(MeResponse { success: false, message: "User not found".into(), full_name: None }),
         Err(e) => HttpResponse::InternalServerError().json(MeResponse { success: false, message: format!("DB error: {}", e), full_name: None }),
+    }
+}
+/// Request payload for creating a new research project
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NewProjectRequest {
+    title: String,
+    problem: String,
+    context: Option<String>,
+    proof_model: String,
+    eval_model: String,
+    reform_model: String,
+    steps: u32,
+    reviews: u8,
+    iterations: u8,
+    reformat: bool,
+    theorem_graph: bool,
+}
+
+/// Handle creating a new research project: for now just log the received config
+/// Create & start a remote research session for the authenticated user
+async fn handle_new_project(
+    db: web::Data<DatabaseConnection>,
+    req: HttpRequest,
+    payload: web::Json<NewProjectRequest>,
+) -> impl Responder {
+    // Authenticate via Bearer JWT
+    let auth_header = req.headers().get("Authorization").and_then(|v| v.to_str().ok()).unwrap_or("");
+    if !auth_header.starts_with("Bearer ") {
+        return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Missing or invalid Authorization header".into(), token: None });
+    }
+    let token = &auth_header[7..];
+    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "secret".into());
+    let claims = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_ref()),
+        &Validation::new(Algorithm::HS256)
+    ) {
+        Ok(data) => data.claims,
+        Err(_) => return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Invalid token".into(), token: None }),
+    };
+    let user_id = claims.sub;
+    info!("Starting new remote session for user {}", user_id);
+    // Build session config from request
+    let req = payload.into_inner();
+    // Log project config
+    info!("User {} project config: {{ problem: {}, context: {:?}, proof_model: {}, eval_model: {}, reform_model: {}, steps: {}, reviews: {}, iterations: {}, reformat: {}, theorem_graph: {} }}",
+        user_id,
+        req.problem,
+        req.context,
+        req.proof_model,
+        req.eval_model,
+        req.reform_model,
+        req.steps,
+        req.reviews,
+        req.iterations,
+        req.reformat,
+        req.theorem_graph
+    );
+    let mut config = ResearchSessionConfig::new()
+        .title(req.title.clone())
+        .proof_model(req.proof_model)
+        .eval_model(req.eval_model)
+        .reform_model(req.reform_model)
+        .steps(req.steps)
+        .reviews(req.reviews)
+        .iterations(req.iterations)
+        .reformat(req.reformat)
+        .streaming(false)
+        .theorem_graph_mode(req.theorem_graph);
+    config.set_problem(req.problem);
+    if let Some(c) = req.context {
+        config.set_context(c);
+    }
+    // Initialize and spawn background research task
+    let db_conn = db.get_ref().clone();
+    tokio::spawn(async move {
+        let mut session = ResearchSession::new(config);
+        if let Err(e) = session.remote_run(&db_conn, user_id).await {
+            error!("remote_run failed: {}", e);
+        }
+    });
+    // Immediate response
+    HttpResponse::Ok().json(ApiResponse { success: true, message: "Project submitted and session started".into(), token: None })
+}
+
+/// Structure returned for project listings
+#[derive(Serialize)]
+struct ProjectInfo {
+    id: i32,
+    title: String,
+    problem: String,
+    context: Option<String>,
+    created_at: String,
+    last_active: String,
+    lemmas_count: i32,
+}
+
+/// GET /api/projects: list all projects for the authenticated user
+async fn handle_list_projects(
+    db: web::Data<DatabaseConnection>,
+    req: HttpRequest,
+) -> impl Responder {
+    let auth_header = req.headers().get("Authorization").and_then(|v| v.to_str().ok()).unwrap_or("");
+    if !auth_header.starts_with("Bearer ") {
+        return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Missing or invalid Authorization header".into(), token: None });
+    }
+    let token = &auth_header[7..];
+    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "secret".into());
+    let claims = match decode::<Claims>(token, &DecodingKey::from_secret(secret.as_ref()), &Validation::new(Algorithm::HS256)) {
+        Ok(data) => data.claims,
+        Err(_) => return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Invalid token".into(), token: None }),
+    };
+    let user_id = claims.sub;
+    let sql = format!(
+        "SELECT id, title, problem, context, created_at, last_active, lemmas_count FROM projects WHERE user_id={} ORDER BY last_active DESC", user_id
+    );
+    match db.get_ref().query_all(Statement::from_string(DbBackend::Sqlite, sql)).await {
+        Ok(rows) => {
+            let mut list = Vec::new();
+            for row in rows {
+                let id: i32 = row.try_get("", "id").unwrap_or_default();
+                let title: String = row.try_get("", "title").unwrap_or_default();
+                let problem: String = row.try_get("", "problem").unwrap_or_default();
+                let context: Option<String> = row.try_get("", "context").ok().flatten();
+                let created_at: String = row.try_get("", "created_at").unwrap_or_default();
+                let last_active: String = row.try_get("", "last_active").unwrap_or_default();
+                let lemmas_count: i32 = row.try_get("", "lemmas_count").unwrap_or_default();
+                list.push(ProjectInfo { id, title, problem, context, created_at, last_active, lemmas_count });
+            }
+            HttpResponse::Ok().json(list)
+        }
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse { success: false, message: format!("Failed to fetch projects: {}", e), token: None }),
+    }
+}
+
+// GET /api/project/{id}
+/// Return full project details including memory blocks
+async fn handle_get_project(
+    db: web::Data<DatabaseConnection>,
+    req: HttpRequest,
+    path: Path<(i32,)>,
+) -> impl Responder {
+    // Authenticate
+    let auth_header = req.headers().get("Authorization").and_then(|v| v.to_str().ok()).unwrap_or("");
+    if !auth_header.starts_with("Bearer ") {
+        return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Missing Authorization".into(), token: None });
+    }
+    let token = &auth_header[7..];
+    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "secret".into());
+    let claims = match decode::<Claims>(token, &DecodingKey::from_secret(secret.as_ref()), &Validation::new(Algorithm::HS256)) {
+        Ok(data) => data.claims,
+        Err(_) => return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Invalid token".into(), token: None }),
+    };
+    let user_id = claims.sub;
+    let project_id = path.into_inner().0;
+    // Query project
+    let sql = format!(
+        "SELECT id, title, problem, context, memory, created_at, last_active, lemmas_count FROM projects WHERE id={} AND user_id={} LIMIT 1",
+        project_id, user_id
+    );
+    match db.get_ref().query_one(Statement::from_string(DbBackend::Sqlite, sql)).await {
+        Ok(Some(row)) => {
+            let id: i32 = row.try_get("", "id").unwrap_or_default();
+            let title: String = row.try_get("", "title").unwrap_or_default();
+            let problem: String = row.try_get("", "problem").unwrap_or_default();
+            let context: Option<String> = row.try_get("", "context").ok().flatten();
+            let mem_json: String = row.try_get("", "memory").unwrap_or_default();
+            let memory: Vec<crate::agents::MemoryBlock> = serde_json::from_str(&mem_json).unwrap_or_default();
+            let created_at: String = row.try_get("", "created_at").unwrap_or_default();
+            let last_active: String = row.try_get("", "last_active").unwrap_or_default();
+            let lemmas_count: i32 = row.try_get("", "lemmas_count").unwrap_or_default();
+            #[derive(Serialize)]
+            struct ProjectDetail {
+                id: i32,
+                title: String,
+                problem: String,
+                context: Option<String>,
+                memory: Vec<crate::agents::MemoryBlock>,
+                created_at: String,
+                last_active: String,
+                lemmas_count: i32,
+            }
+            let detail = ProjectDetail { id, title, problem, context, memory, created_at, last_active, lemmas_count };
+            HttpResponse::Ok().json(detail)
+        }
+        Ok(None) => HttpResponse::NotFound().json(ApiResponse { success: false, message: "Project not found".into(), token: None }),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse { success: false, message: format!("DB error: {}", e), token: None }),
     }
 }

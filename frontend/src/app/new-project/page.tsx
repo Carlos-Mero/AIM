@@ -2,10 +2,13 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/context/AuthContext';
 import NavBar from '@/components/NavBar';
 
 export default function NewProjectPage() {
   const router = useRouter();
+  const { token } = useAuth();
+  const [title, setTitle] = useState<string>('');
   const [problem, setProblem] = useState<string>('');
   const [context, setContext] = useState<string>('');
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
@@ -17,15 +20,14 @@ export default function NewProjectPage() {
   const [reviews, setReviews] = useState<number>(3);
   const [iterations, setIterations] = useState<number>(4);
   const [reformat, setReformat] = useState<boolean>(true);
-  const [streaming, setStreaming] = useState<boolean>(true);
   const [theoremGraph, setTheoremGraph] = useState<boolean>(true);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // For now, just log the config and navigate back
     const config = {
+      title,
       problem,
-      context,
+      context: context || undefined,
       proofModel,
       evalModel,
       reformModel,
@@ -33,12 +35,23 @@ export default function NewProjectPage() {
       reviews,
       iterations,
       reformat,
-      streaming,
       theoremGraph,
     };
-    console.log('New project config:', config);
-    // TODO: send to server or initialize project directory
-    router.push('/');
+    try {
+      const headers: Record<string,string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch('/api/project', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(config),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // submission succeeded, navigate home or to new project page
+      router.push('/');
+    } catch (err) {
+      console.error('Failed to submit project:', err);
+      // TODO: show user-facing error message
+    }
   };
 
   return (
@@ -51,20 +64,34 @@ export default function NewProjectPage() {
           </header>
           <div className="px-8 py-6 space-y-6">
             <form onSubmit={handleSubmit} className="space-y-6">
-              <div>
-                <label htmlFor="problem" className="block text-xl font-bold text-gray-900 mb-2">
-                  问题 (Problem)
-                </label>
-                <textarea
+          <div>
+            <label htmlFor="title" className="block text-xl font-bold text-gray-900 mb-2">
+              标题 (Title)
+            </label>
+            <input
+              id="title"
+              type="text"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              required
+              className="w-full rounded-lg border border-gray-300 p-2 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="请输入研究项目的标题"
+            />
+          </div>
+          <div>
+            <label htmlFor="problem" className="block text-xl font-bold text-gray-900 mb-2">
+              问题 (Problem)
+            </label>
+            <textarea
+              id="problem"
               value={problem}
               onChange={e => setProblem(e.target.value)}
               required
               rows={6}
-                  id="problem"
-                  className="w-full rounded-lg border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="在此输入问题的准确陈述，支持 Markdown、LaTeX"
+              className="w-full rounded-lg border border-gray-300 p-2 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="在此输入问题的准确陈述，支持 Markdown、LaTeX"
             />
-              </div>
+          </div>
           <div>
             <label htmlFor="context" className="block text-xl font-bold text-gray-900 mb-2">
               背景与符号定义 (Context)
@@ -72,10 +99,9 @@ export default function NewProjectPage() {
             <textarea
               value={context}
               onChange={e => setContext(e.target.value)}
-              required
               rows={6}
-              className="w-full border border-gray-300 rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="在此输入所有背景信息与符号定义，支持 Markdown、LaTeX"
+              className="w-full border border-gray-300 rounded-md p-2 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="在此输入所有背景信息与符号定义（可选），支持 Markdown、LaTeX"
             />
           </div>
           <div>
@@ -91,70 +117,66 @@ export default function NewProjectPage() {
             <div className="space-y-4 bg-gray-50 p-4 rounded-md border border-gray-200">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm">Proof Model</label>
+                  <label className="block text-sm text-gray-700">Proof Model</label>
                   <input
                     value={proofModel}
                     onChange={e => setProofModel(e.target.value)}
-                    className="w-full border rounded p-1"
+                    className="w-full border rounded p-1 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm">Eval Model</label>
+                  <label className="block text-sm text-gray-700">Eval Model</label>
                   <input
                     value={evalModel}
                     onChange={e => setEvalModel(e.target.value)}
-                    className="w-full border rounded p-1"
+                    className="w-full border rounded p-1 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm">Reform Model</label>
+                  <label className="block text-sm text-gray-700">Reform Model</label>
                   <input
                     value={reformModel}
                     onChange={e => setReformModel(e.target.value)}
-                    className="w-full border rounded p-1"
+                    className="w-full border rounded p-1 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm">Steps (1–40)</label>
+                  <label className="block text-sm text-gray-700">Steps (1–40)</label>
                   <input
                     type="number"
                     value={steps}
                     min={1} max={40}
                     onChange={e => setSteps(+e.target.value)}
-                    className="w-full border rounded p-1"
+                    className="w-full border rounded p-1 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Reviews (1–6)</label>
+                  <label className="block text-sm text-gray-700">Reviews (1–6)</label>
                   <input
                     type="number"
                     value={reviews}
                     min={1} max={6}
                     onChange={e => setReviews(+e.target.value)}
-                    className="w-full border-gray-300 rounded p-2 focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full border border-gray-300 rounded p-1 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm">Iterations (1–10)</label>
+                  <label className="block text-sm text-gray-700">Iterations (1–10)</label>
                   <input
                     type="number"
                     value={iterations}
                     min={1} max={10}
                     onChange={e => setIterations(+e.target.value)}
-                    className="w-full border rounded p-1"
+                    className="w-full border rounded p-1 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
               </div>
-              <div className="flex items-center space-x-4">
+              <div className="flex items-center text-gray-700 space-x-4">
                 <label className="flex items-center space-x-2">
                   <input type="checkbox" checked={reformat} onChange={e => setReformat(e.target.checked)} />
                   <span className="text-sm">Reformat conjectures</span>
                 </label>
-                <label className="flex items-center space-x-2">
-                  <input type="checkbox" checked={streaming} onChange={e => setStreaming(e.target.checked)} />
-                  <span className="text-sm">Streaming output</span>
-                </label>
-                <label className="flex items-center space-x-2">
+                <label className="flex items-center text-gray-700 space-x-2">
                   <input type="checkbox" checked={theoremGraph} onChange={e => setTheoremGraph(e.target.checked)} />
                   <span className="text-sm">Theorem graph mode</span>
                 </label>

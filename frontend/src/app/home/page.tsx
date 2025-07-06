@@ -1,20 +1,41 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import NavBar from '@/components/NavBar';
 import Link from 'next/link';
 import { FaPlus } from 'react-icons/fa';
 
 interface Project {
-  id: string;
+  id: number;
   title: string;
-  description: string;
-  createdAt: string;
-  lastActive: string;
-  lemmasCount: number;
+  problem: string;
+  context?: string;
+  created_at: string;
+  last_active: string;
+  lemmas_count: number;
 }
 
+// Format ISO date to localized date string (e.g. "2023/10/19")
+function formatDate(iso: string) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString();
+}
+// Compute relative "time ago" for ISO timestamp
+function timeAgo(iso: string) {
+  const then = new Date(iso).getTime();
+  if (isNaN(then)) return iso;
+  const diffSec = Math.floor((Date.now() - then) / 1000);
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `${diffH}h ago`;
+  const diffD = Math.floor(diffH / 24);
+  if (diffD < 7) return `${diffD}d ago`;
+  return formatDate(iso);
+}
 const HomePage: React.FC = () => {
   // Get current user name from auth context
   const { fullName } = useAuth();
@@ -23,40 +44,37 @@ const HomePage: React.FC = () => {
   //   if (!token) router.push('/login');
   // }, [token]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
   
-  // 模拟项目数据
-  const [projects] = useState<Project[]>([
-    {
-      id: "1",
-      title: "黎曼猜想的几何解析",
-      description: "探索黎曼Zeta函数的几何意义及其与双曲几何的联系",
-      createdAt: "2023-10-15",
-      lastActive: "5小时前",
-      lemmasCount: 8
-    },
-    {
-      id: "2",
-      title: "非交换几何中的规范场论",
-      description: "在非交换几何框架下建立新的规范场理论模型",
-      createdAt: "2023-09-22",
-      lastActive: "2天前",
-      lemmasCount: 12
-    },
-    {
-      id: "3",
-      title: "拓扑数据分析的高维推广",
-      description: "扩展TDA方法到高维数据流形的有效算法研究",
-      createdAt: "2023-08-05",
-      lastActive: "1周前",
-      lemmasCount: 5
-    }
-  ]);
+  // Load projects on mount
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch('/api/projects', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`);
+        const data: Project[] = await res.json();
+        setProjects(data);
+      } catch (err: unknown) {
+        if (err instanceof Error) setError(err.message)
+        else setError(String(err) || 'Error loading projects');
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
 
 
   // 过滤项目函数
   const filteredProjects = projects.filter(project => 
     project.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    project.description.toLowerCase().includes(searchQuery.toLowerCase())
+    project.problem.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
@@ -80,7 +98,9 @@ const HomePage: React.FC = () => {
 
         {/* 项目列表 */}
         <div>
-          <h2 className="text-2xl font-semibold text-gray-800 mb-6">您的研究项目 ({projects.length})</h2>
+        <h2 className="text-2xl font-semibold text-gray-800 mb-6">您的研究项目 ({projects.length})</h2>
+        {loading && <p className="text-gray-600">加载中...</p>}
+        {error && <p className="text-red-600">{error}</p>}
           
           {filteredProjects.length === 0 ? (
             <div className="bg-white rounded-2xl shadow-md p-8 text-center">
@@ -96,22 +116,22 @@ const HomePage: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredProjects.map((project) => (
             <Link
-              href={`/project/${project.id}`}
+              href={`/project?projectId=${project.id}`}
               key={project.id}
               className="block bg-white rounded-2xl shadow-md overflow-hidden hover:shadow-lg transition-shadow cursor-pointer"
             >
               <div className="p-6">
                 <div className="flex justify-between items-start mb-3">
                   <h3 className="text-xl font-semibold text-gray-800 truncate max-w-[70%]">{project.title}</h3>
-                  <span className="text-xs text-gray-500">{project.createdAt}</span>
+                  <span className="text-xs text-gray-500">{formatDate(project.created_at)}</span>
                 </div>
-                <p className="text-gray-600 mb-4 h-14 line-clamp-2">{project.description}</p>
+                <p className="text-gray-600 mb-4 h-14 line-clamp-2">{project.problem}</p>
                 <div className="flex justify-between text-sm text-gray-500">
                   <div>
                     <span className="font-medium">引理: </span>
-                    <span className="text-blue-600 font-bold">{project.lemmasCount}</span>
+                    <span className="text-blue-600 font-bold">{project.lemmas_count}</span>
                   </div>
-                  <span>{project.lastActive}</span>
+                  <span>{timeAgo(project.last_active)}</span>
                 </div>
               </div>
               <div className="bg-gray-50 px-6 py-3 border-t border-gray-100">

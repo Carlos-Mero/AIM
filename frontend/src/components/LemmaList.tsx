@@ -63,7 +63,7 @@ const LemmaList: React.FC<LemmaListProps> = ({
                 <FaCircle 
                   className={`text-xs mr-2 ${getStatusColor(lemma.status)}`} 
                 />
-                <span className="text-xs font-medium">
+                <span className="text-xs font-medium text-gray-600">
                   {lemma.status === 'proved' ? '已证明' :
                    lemma.status === 'in_progress' ? '证明中' :
                    lemma.status === 'invalid' ? '无效' : '待处理'}

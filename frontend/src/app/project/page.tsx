@@ -1,20 +1,46 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { Suspense } from 'react';
 import { BlockMath, InlineMath } from 'react-katex';
 import 'katex/dist/katex.min.css';
 import NavBar from '@/components/NavBar';
 import { FaSearch, FaPlus, FaInfoCircle } from 'react-icons/fa';
 import LemmaList from '@/components/LemmaList';
 import LemmaDetail from '@/components/LemmaDetail';
-import { useParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
+import { useAuth } from '@/context/AuthContext';
+// base URL of backend API (set via NEXT_PUBLIC_API_BASE_URL in .env.local)
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
+// Format ISO date to localized date string (e.g. "2023/10/19")
+function formatDate(iso: string) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString();
+}
+// Compute relative "time ago" for ISO timestamp
+function timeAgo(iso: string) {
+  const then = new Date(iso).getTime();
+  if (isNaN(then)) return iso;
+  const diffSec = Math.floor((Date.now() - then) / 1000);
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `${diffH}h ago`;
+  const diffD = Math.floor(diffH / 24);
+  if (diffD < 7) return `${diffD}d ago`;
+  return formatDate(iso);
+}
 
 interface Project {
-  id: string;
+  id: number;
   title: string;
-  description: string;
-  createdAt: string;
-  lastActive: string;
+  problem: string;
+  context?: string;
+  created_at: string;
+  last_active: string;
+  memory: Array<{ memtype: string; content: string; proof: string; solved: boolean }>;
 }
 
 interface Lemma {
@@ -29,27 +55,48 @@ interface Lemma {
   lastUpdated: string;
 }
 
-const ProjectDetailPage: React.FC = () => {
-  const { projectId } = useParams();
-
-  // 当前选择的引理
+const ProjectDetailContent: React.FC = () => {
+  // read projectId from query string
+  const searchParams = useSearchParams();
+  const projectId = searchParams.get('projectId');
+  const { token } = useAuth();
+  const [project, setProject] = useState<Project | null>(null);
   const [selectedLemma, setSelectedLemma] = useState<Lemma | null>(null);
-  // 搜索关键词
   const [filter, setFilter] = useState<string>('');
+  const [lemmas, setLemmas] = useState<Lemma[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
 
-  // 模拟项目数据（包含数学公式）
-  const project: Project = {
-    id: projectId as string,
-    title: "黎曼猜想的几何解析",
-    description: `探索黎曼Zeta函数 $\\zeta(s)$ 的几何意义及其与双曲几何的联系。
-
-例如，当 $M$ 是 n 维双曲空间时，研究 $$\\zeta_M(s) = \\sum_{\gamma} e^{-s \\ell(\\gamma)}$$ 在 $\\Re(s) > n/2$ 上的性质。`,
-    createdAt: "2023-10-15",
-    lastActive: "5小时前"
-  };
+  // fetch project detail
+  useEffect(() => {
+    if (!token || !projectId) return;
+    setLoading(true);
+    // Fetch project details from backend API
+    fetch(`${API_BASE}/api/project/${projectId}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(res => res.json())
+      .then((data: Project) => {
+        setProject(data);
+        // map memory blocks to lemmas
+        const mapped = data.memory.map((m, idx) => ({
+          id: idx,
+          title: `${m.memtype}-${idx}`,
+          statement: m.content,
+          proof: m.proof,
+          status: m.solved ? 'proved' : 'pending',
+          difficulty: 'medium',
+          createdBy: '',
+          createdAt: '',
+          lastUpdated: ''
+        } as Lemma));
+        setLemmas(mapped);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [projectId, token]);
   // 渲染项目描述，支持行内/块级公式
-  const renderDescription = () => {
-    return project.description.split(/\n{2,}/).flatMap((para, pidx) => {
+  const renderDescription = (text: string) => {
+    return text.split(/\n{2,}/).flatMap((para, pidx) => {
       const tokens = para.split(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\$[^$\n]+\$)/g).filter(Boolean);
       let buf: React.ReactNode[] = [];
       const elems: React.ReactNode[] = [];
@@ -85,58 +132,10 @@ const ProjectDetailPage: React.FC = () => {
     });
   };
 
-  // 模拟引理数据
-  const lemmas: Lemma[] = [
-    {
-      id: "lemma-1",
-      title: "双曲空间上的Zeta函数",
-      statement: "设 $M$ 是$n$维双曲空间，则其上的Zeta函数 $\\zeta_M(s)$ 在 $\\Re(s) > n/2$ 时绝对收敛",
-      proof: "### 证明\n使用非交换几何分析方法，考虑双曲空间的谱几何性质。设 $\\Delta$ 为Laplace算子...\n\n\\[\n\\operatorname{Tr}(e^{-t\\Delta}) \\sim (4\\pi t)^{-n/2} \\sum_{k=0}^{\\infty} a_k t^k\\quad(t \\to 0^+)\n\\]\n\n由热核渐近展开可得...",
-      status: "proved",
-      difficulty: "hard",
-      createdBy: "系统生成",
-      createdAt: "2023-10-16",
-      lastUpdated: "2023-10-20"
-    },
-    {
-      id: "lemma-2",
-      title: "奇点解的解析延拓",
-      statement: "若 $f(z)$ 在 $|z|<R$ 内亚纯，且在 $z=0$ 有极点，则可将 $\\zeta(s) = \\sum f(n)n^{-s}$ 解析延拓至整个复平面",
-      proof: "### 证明\n考虑Mellin变换：\n\n\\[\n\\zeta(s) = \\frac{1}{\\Gamma(s)} \\int_0^\\infty x^{s-1}\\sum_{n=1}^\\infty f(n)e^{-nx} dx\n\\]\n\n利用 $f(n)$ 的亚纯性质，可证明...",
-      status: "in_progress",
-      difficulty: "medium",
-      createdBy: "系统生成",
-      createdAt: "2023-10-18",
-      lastUpdated: "2023-10-22"
-    },
-    {
-      id: "lemma-3",
-      title: "谱对称性的充分条件",
-      statement: "若流形的谱具有对称性 $\\lambda_i + \\lambda_j = \\lambda_k$ 对某些特定指标成立，则其几何结构必须对称",
-      proof: "### 证明\n假设 $M$ 是紧致连通黎曼流形，$\\Delta f_i = \\lambda_i f_i$。考虑关联图 \n\n\\[\nG = \\{(i,j,k) : \\lambda_i + \\lambda_j = \\lambda_k\\}\n\\]\n\n由热核估计可证当$|G| > N$时...",
-      status: "pending",
-      difficulty: "medium",
-      createdBy: "系统生成",
-      createdAt: "2023-10-20",
-      lastUpdated: "2023-10-20"
-    },
-    {
-      id: "lemma-4",
-      title: "Selberg迹公式的几何阐释",
-      statement: "对于有限体积双曲曲面，Selberg迹公式可解释为几何上的闭测地线计数",
-      proof: "### 证明\n设 $\\Gamma \\backslash \\mathbb{H}$ 为亏格$g$的紧双曲曲面。Selberg迹公式表述为：\n\n\\[\n\\sum_{n=0}^{\\infty} h(r_n) = \\frac{\\mu(F)}{4\\pi} \\int_{-\\infty}^{\\infty} r h(r) \\tanh(\\pi r) dr + \\sum_{\\{T\\}} \\frac{\\log N(T_0)}{N(T)^{1/2} - N(T)^{-1/2}} g(\\log N(T))\n\\]\n\n左边是Laplace算子谱的贡献...",
-      status: "proved",
-      difficulty: "hard",
-      createdBy: "系统生成",
-      createdAt: "2023-10-22",
-      lastUpdated: "2023-10-25"
-    },
-  ];
-
   // 创建新引理（模拟）
   const handleCreateLemma = () => {
     const newLemma: Lemma = {
-      id: `lemma-${lemmas.length + 1}`,
+      id: lemmas.length,
       title: "新引理",
       statement: "在此处添加引理陈述...",
       proof: "### 证明\n在此处撰写证明...",
@@ -150,24 +149,32 @@ const ProjectDetailPage: React.FC = () => {
     setSelectedLemma(newLemma);
   };
 
-  const filteredLemmas = lemmas.filter(l =>
-    l.title.includes(filter) || l.statement.includes(filter)
-  );
+  const filteredLemmas = lemmas.filter(l => l.title.includes(filter) || l.statement.includes(filter));
+  if (!token) return <p className="text-center mt-8">请先登录</p>;
+  if (loading || !project) return <p className="text-center mt-8">加载中...</p>;
   return (
     <div className="flex flex-col min-h-screen bg-gray-50">
       <NavBar />
       <main className="flex-1 container mx-auto px-4 py-6">
-          {/* 项目信息 */}
-          <div className="bg-white rounded-2xl shadow p-6 mb-6">
-            <h1 className="text-2xl font-bold text-gray-800">{project.title}</h1>
+        {/* 项目信息 */}
+        <div className="bg-white rounded-2xl shadow p-6 mb-6">
+          <h1 className="text-2xl font-bold text-gray-800">{project.title}</h1>
           <div className="mt-2 text-gray-600 prose">
-            {renderDescription()}
+            {renderDescription(project.problem)}
           </div>
-            <div className="mt-3 text-sm text-gray-500 flex items-center">
-              <FaInfoCircle className="mr-1" />
-              <span>创建于 {project.createdAt} · 最后活跃 {project.lastActive}</span>
+          {project.context && (
+            <div className="mt-4 p-4 bg-gray-50 border-l-4 border-blue-500">
+              <h3 className="font-semibold mb-2">Context</h3>
+              <div className="text-gray-700 prose">
+                {renderDescription(project.context)}
+              </div>
             </div>
+          )}
+          <div className="mt-3 text-sm text-gray-500 flex items-center">
+            <FaInfoCircle className="mr-1" />
+            <span>创建于 {formatDate(project.created_at)} · 最后活跃 {timeAgo(project.last_active)}</span>
           </div>
+        </div>
           {/* 主体区域：列表 & 详情 */}
           <div className="flex flex-col lg:flex-row gap-6 h-full">
             {/* 左侧：列表区 */}
@@ -227,6 +234,26 @@ const ProjectDetailPage: React.FC = () => {
           </div>
         </main>
       </div>
+  );
+};
+
+const ProjectLoadingFallback = () => (
+  <div className="flex flex-col min-h-screen bg-gray-50">
+    <NavBar />
+    <main className="flex-1 container mx-auto px-4 py-6">
+      <div className="text-center py-20">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mx-auto mb-4"></div>
+        <p>加载项目数据中，请稍候...</p>
+      </div>
+    </main>
+  </div>
+);
+
+const ProjectDetailPage = () => {
+  return (
+    <Suspense fallback={<ProjectLoadingFallback />}>
+      <ProjectDetailContent />
+    </Suspense>
   );
 };
 

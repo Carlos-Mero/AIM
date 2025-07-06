@@ -104,7 +104,7 @@ const LemmaDetail: React.FC<LemmaDetailProps> = ({ lemma }) => {
             <div className="flex items-center space-x-6 mb-4">
               <div className="flex items-center">
                 <span className="text-gray-600 mr-2">状态:</span>
-                <span className="flex items-center font-medium">
+                <span className="flex items-center text-gray-600 font-medium">
                   {getStatusIcon()}
                   <span className="ml-2">
                     {lemma.status === 'proved' ? '已证明' :
@@ -115,13 +115,13 @@ const LemmaDetail: React.FC<LemmaDetailProps> = ({ lemma }) => {
               </div>
               <div className="flex items-center">
                 <span className="text-gray-600 mr-2">难度:</span>
-                <span className="font-medium">
+                <span className="font-medium text-gray-600">
                   {getDifficultyText()}
                 </span>
               </div>
               <div className="flex items-center">
                 <span className="text-gray-600 mr-2">创建人:</span>
-                <span className="font-medium">{lemma.createdBy}</span>
+                <span className="font-medium text-gray-600">{lemma.createdBy}</span>
               </div>
             </div>
           </div>
@@ -132,7 +132,7 @@ const LemmaDetail: React.FC<LemmaDetailProps> = ({ lemma }) => {
         </div>
 
         {/* 引理陈述 - 支持行内/块级公式，避免 <div> 嵌套在 <p> */}
-        <div className="bg-white rounded-lg p-4 shadow-inner border border-gray-200 mt-4 prose">
+        <div className="bg-white rounded-lg text-gray-600 p-4 shadow-inner border border-gray-200 mt-4 prose">
           <h3 className="text-lg font-semibold mb-3 text-blue-700">引理陈述:</h3>
           {lemma.statement.split(/\n{2,}/).flatMap((para, pidx) => {
             const tokens = para.split(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\$[^$\n]+\$)/g).filter(Boolean);

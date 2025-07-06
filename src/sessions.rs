@@ -9,16 +9,26 @@ use tokio::task::JoinSet;
 
 use log::{info, warn, debug, error};
 use serde::{Serialize, Deserialize};
+use sea_orm::{DatabaseConnection, Statement, DbBackend, ConnectionTrait};
+use chrono::Utc;
 
 #[async_trait::async_trait]
 pub trait Session: Send {
+    /// Run locally, persisting to filesystem
     async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>>;
+    /// Run remotely, persisting to database
+    async fn remote_run(
+        &mut self,
+        db: &DatabaseConnection,
+        user_id: i32,
+    ) -> Result<(), Box<dyn std::error::Error>>;
 }
 
 const MAX_REVIEWS_PER_NODE: u8 = 24;
 
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct ResearchSessionConfig {
+    title: String,
     logdir: PathBuf,
     proof_model: String,
     eval_model: String,
@@ -28,6 +38,7 @@ pub struct ResearchSessionConfig {
     iterations: u8,
     currect_steps: u32,
     problem: String,
+    context: String,
     resume: bool, // resume from existing explore trajectory
     reformat: bool, // reformat conjectures and proofs after exploration
     streaming: bool, // streaming output in exploration
@@ -36,6 +47,7 @@ pub struct ResearchSessionConfig {
 
 impl ResearchSessionConfig {
     pub fn new() -> Self {Self::default()}
+    pub fn title(mut self, title: impl Into<String>) -> Self { self.title = title.into(); self }
     pub fn proof_model(mut self, proof_model: impl Into<String>) -> Self {self.proof_model = proof_model.into(); self}
     pub fn eval_model(mut self, eval_model: impl Into<String>) -> Self {self.eval_model = eval_model.into(); self}
     pub fn reform_model(mut self, reform_model: impl Into<String>) -> Self {self.reform_model = reform_model.into(); self}
@@ -49,6 +61,7 @@ impl ResearchSessionConfig {
     pub fn theorem_graph_mode(mut self, tgm: bool) -> Self {self.theorem_graph_mode = tgm; self}
     pub fn set_current_steps(&mut self, steps: u32) -> &Self {self.currect_steps = steps; self}
     pub fn set_problem(&mut self, problem: impl Into<String>) -> &Self {self.problem = problem.into(); self}
+    pub fn set_context(&mut self, context: impl Into<String>) -> &Self {self.context = context.into(); self}
 
     pub fn save_configs(&self) -> Result<(), Box<dyn std::error::Error>> {
         let serialized_config = serde_json::to_string_pretty(self)?;
@@ -563,6 +576,61 @@ impl Session for ResearchSession {
         }
         self.format_to_markdown().await?;
 
+        Ok(())
+    }
+    /// Run session remotely: same workflow as `run`, but persist results in SQLite
+    async fn remote_run(
+        &mut self,
+        db: &DatabaseConnection,
+        user_id: i32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Set up problem and initial context/memory
+        self.explorer.set_problem(self.config.problem.clone());
+        // Prepare timestamp and initial record
+        let ts = Utc::now().to_rfc3339().replace("'", "''");
+        let cfg_json = serde_json::to_string(&self.config)?;
+        let init_mem = serde_json::to_string(&self.memory)?;
+        let ctx = self.memory.memory.iter()
+            .find(|m| m.memtype == "context")
+            .map(|m| m.content.clone()).unwrap_or_default();
+        let title = self.config.title.replace("'", "''");
+        // initial lemma count from memory blocks
+        let init_lemmas = self.memory.memory.iter().filter(|m| m.memtype == "lemma").count() as i32;
+        let insert_sql = format!(
+            "INSERT INTO projects (user_id, title, problem, context, config, memory, created_at, last_active, lemmas_count) VALUES ({}, '{}', '{}', '{}', '{}', '{}', '{}', '{}', {})",
+            user_id,
+            title,
+            self.config.problem.replace("'", "''"),
+            ctx.replace("'", "''"),
+            cfg_json.replace("'", "''"),
+            init_mem.replace("'", "''"),
+            ts,
+            ts,
+            init_lemmas,
+        );
+        db.execute(Statement::from_string(DbBackend::Sqlite, insert_sql)).await?;
+        // Exploration loop: update memory after each step
+        for _ in 0..self.config.steps {
+            let done = if self.config.theorem_graph_mode {
+                self.graph_step().await?
+            } else {
+                self.step().await?
+            };
+            // update memory, last_active and lemma count
+            let mem_json = serde_json::to_string(&self.memory.memory)?;
+            let now = Utc::now().to_rfc3339().replace("'", "''");
+            let lemmas = self.memory.memory.iter().filter(|m| m.memtype == "lemma").count() as i32;
+            let upd_sql = format!(
+                "UPDATE projects SET memory='{}', last_active='{}', lemmas_count={} WHERE user_id={} AND created_at='{}'",
+                mem_json.replace("'", "''"),
+                now,
+                lemmas,
+                user_id,
+                ts,
+            );
+            db.execute(Statement::from_string(DbBackend::Sqlite, upd_sql)).await?;
+            if done { break; }
+        }
         Ok(())
     }
 }
