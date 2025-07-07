@@ -105,8 +105,6 @@ const ProjectDetailContent: React.FC = () => {
       }
     };
     loadDetail();
-    const timer = setInterval(loadDetail, 3 * 60 * 1000);
-    return () => clearInterval(timer);
   }, [projectId, token]);
   // 渲染项目描述，支持行内/块级公式
   const renderDescription = (text: string) => {

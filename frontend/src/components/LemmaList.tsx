@@ -37,7 +37,7 @@ const LemmaList: React.FC<LemmaListProps> = ({
   };
 
   return (
-    <div className="max-h-[calc(100vh-16rem)] overflow-y-auto">
+    <div className="max-h-[calc(100vh-18rem)] overflow-y-auto">
       {lemmas.map((lemma) => (
         <div 
           key={lemma.id}

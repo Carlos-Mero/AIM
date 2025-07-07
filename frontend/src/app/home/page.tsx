@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import NavBar from '@/components/NavBar';
 import Link from 'next/link';
@@ -43,6 +44,7 @@ const HomePage: React.FC = () => {
   // useEffect(() => {
   //   if (!token) router.push('/login');
   // }, [token]);
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
@@ -119,10 +121,10 @@ const HomePage: React.FC = () => {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredProjects.map((project) => (
-            <Link
-              href={`/project?projectId=${project.id}`}
+            <div
               key={project.id}
               className="block bg-white rounded-2xl shadow-md overflow-hidden hover:shadow-lg transition-shadow cursor-pointer"
+              onClick={() => router.push(`/project?projectId=${project.id}`)}
             >
               <div className="p-6">
                 <div className="flex justify-between items-start mb-3">
@@ -138,12 +140,28 @@ const HomePage: React.FC = () => {
                   <span>{timeAgo(project.last_active)}</span>
                 </div>
               </div>
-              <div className="bg-gray-50 px-6 py-3 border-t border-gray-100">
-                <span className="text-blue-600 hover:text-blue-800 font-medium">
+              <div className="bg-gray-50 px-6 py-3 border-t border-gray-100 flex justify-between items-center">
+                <span
+                  className="text-blue-600 hover:text-blue-800 font-medium"
+                  onClick={e => { e.stopPropagation(); router.push(`/project?projectId=${project.id}`); }}
+                >
                   查看项目详情
                 </span>
+                <button
+                  className="text-gray-500 hover:text-gray-700 font-medium"
+                  onClick={async e => {
+                    e.stopPropagation();
+                    if (!window.confirm('确认要删除该项目吗？此操作不可撤销。')) return;
+                    const token = localStorage.getItem('token');
+                    const res = await fetch(`/api/project/${project.id}`, {
+                      method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (res.ok) setProjects(prev => prev.filter(p => p.id !== project.id));
+                    else alert('删除失败');
+                  }}
+                >删除</button>
               </div>
-            </Link>
+            </div>
           ))}
             </div>
           )}

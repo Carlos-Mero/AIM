@@ -89,6 +89,7 @@ pub async fn run() -> std::io::Result<()> {
                     // Create a new research project (starts a session)
                     .route("/project", web::post().to(handle_new_project))
                     .route("/project/{id}", web::get().to(handle_get_project))
+                    .route("/project/{id}", web::delete().to(handle_delete_project))
                     .route("/projects", web::get().to(handle_list_projects))
             )
             // Static assets for SPA (responds to GET/HEAD only)
@@ -430,5 +431,32 @@ async fn handle_get_project(
         }
         Ok(None) => HttpResponse::NotFound().json(ApiResponse { success: false, message: "Project not found".into(), token: None }),
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse { success: false, message: format!("DB error: {}", e), token: None }),
+    }
+}
+
+/// DELETE /api/project/{id}: delete a project owned by the authenticated user
+async fn handle_delete_project(
+    db: web::Data<DatabaseConnection>,
+    req: HttpRequest,
+    path: Path<(i32,)>,
+) -> impl Responder {
+    // authenticate
+    let auth_header = req.headers().get("Authorization").and_then(|v| v.to_str().ok()).unwrap_or("");
+    if !auth_header.starts_with("Bearer ") {
+        return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Missing Authorization".into(), token: None });
+    }
+    let token = &auth_header[7..];
+    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "secret".into());
+    let claims = match decode::<Claims>(token, &DecodingKey::from_secret(secret.as_ref()), &Validation::new(Algorithm::HS256)) {
+        Ok(data) => data.claims,
+        Err(_) => return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Invalid token".into(), token: None }),
+    };
+    let user_id = claims.sub;
+    let project_id = path.into_inner().0;
+    // Execute deletion
+    let sql = format!("DELETE FROM projects WHERE id={} AND user_id={}", project_id, user_id);
+    match db.get_ref().execute(Statement::from_string(DbBackend::Sqlite, sql)).await {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse { success: true, message: "Project deleted".into(), token: None }),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse { success: false, message: format!("Delete failed: {}", e), token: None }),
     }
 }
