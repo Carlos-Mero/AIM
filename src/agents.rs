@@ -268,7 +268,7 @@ impl LMClient {
                 "content": prompt
             }
         ],
-            "temperature": 0.6,
+            "temperature": 1.0,
             "stream": true
         });
         let url = format!("{}/v1/chat/completions", &self.base_url.trim_end_matches('/').trim_end_matches("/v1"));
