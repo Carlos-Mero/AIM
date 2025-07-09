@@ -5,7 +5,7 @@ import { Suspense } from 'react';
 import { BlockMath, InlineMath } from 'react-katex';
 import 'katex/dist/katex.min.css';
 import NavBar from '@/components/NavBar';
-import { FaSearch, FaPlus, FaInfoCircle } from 'react-icons/fa';
+import { FaSearch, FaInfoCircle } from 'react-icons/fa';
 import LemmaList from '@/components/LemmaList';
 import LemmaDetail from '@/components/LemmaDetail';
 import Lemma from '@/interfaces/Lemma';
@@ -40,6 +40,15 @@ function timeAgo(iso: string) {
   if (diffD < 7) return `${diffD}d ago`;
   return formatDate(iso);
 }
+// Map project status to badge styles
+function statusClass(status: string) {
+  switch (status) {
+    case 'running': return 'bg-blue-100 text-blue-800';
+    case 'solved': return 'bg-green-100 text-green-800';
+    case 'ended': return 'bg-gray-100 text-gray-800';
+    default: return 'bg-gray-100 text-gray-800';
+  }
+}
 
 interface Project {
   id: number;
@@ -48,6 +57,7 @@ interface Project {
   context?: string;
   created_at: string;
   last_active: string;
+  status: string;
   memory: Array<{
     memtype: string;
     content: string;
@@ -72,7 +82,7 @@ const ProjectDetailContent: React.FC = () => {
   const [lemmas, setLemmas] = useState<Lemma[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // fetch and auto-reload project detail on mount and every 3 minutes
+  // fetch and auto-reload project detail (initial load + interval)
   useEffect(() => {
     if (!token || !projectId) return;
     const loadDetail = async () => {
@@ -84,7 +94,7 @@ const ProjectDetailContent: React.FC = () => {
         if (!res.ok) throw new Error(`Failed to fetch project: ${res.status}`);
         const data: Project = await res.json();
         setProject(data);
-        // map memory blocks to lemmas
+        // map memory to lemmas
         const mapped = data.memory.map((m, idx) => ({
           id: idx,
           title: `${m.memtype}-${idx}`,
@@ -105,6 +115,8 @@ const ProjectDetailContent: React.FC = () => {
       }
     };
     loadDetail();
+    const timer = setInterval(loadDetail, 30000);
+    return () => clearInterval(timer);
   }, [projectId, token]);
   // 渲染项目描述，支持行内/块级公式
   const renderDescription = (text: string) => {
@@ -147,23 +159,6 @@ const ProjectDetailContent: React.FC = () => {
     });
   };
 
-  const handleCreateLemma = () => {
-    const newLemma: Lemma = {
-      id: lemmas.length,
-      title: "新引理",
-      statement: "在此处添加引理陈述...",
-      proof: "### 证明\n在此处撰写证明...",
-      status: "pending",
-      // timestamps default to now
-      createdAt: new Date().toISOString(),
-      lastUpdated: new Date().toISOString(),
-      reviews: 0,
-      comment: "",
-      deps: []
-    };
-
-    setSelectedLemma(newLemma);
-  };
 
   const filteredLemmas = lemmas.filter(l => (l.title.includes(filter) || l.statement.includes(filter)) && !l.title.includes("context"));
   if (!token) return <p className="text-center mt-8">请先登录</p>;
@@ -186,10 +181,13 @@ const ProjectDetailContent: React.FC = () => {
               </div>
             </div>
           )}
-          <div className="mt-3 text-sm text-gray-500 flex items-center">
+        <div className="mt-3 flex items-center space-x-4">
+          <div className="text-sm text-gray-500 flex items-center">
             <FaInfoCircle className="mr-1" />
             <span>创建于 {formatDate(project.created_at)} · 最后活跃 {timeAgo(project.last_active)}</span>
           </div>
+          <span className={`px-2 py-1 rounded-full text-xs font-medium uppercase ${statusClass(project.status)}`}>{project.status}</span>
+        </div>
         </div>
           {/* 主体区域：列表 & 详情 */}
           <div className="flex flex-col lg:flex-row gap-6 h-full">
@@ -197,12 +195,7 @@ const ProjectDetailContent: React.FC = () => {
             <div className="flex flex-col lg:w-1/3 bg-white rounded-2xl shadow lg:sticky lg:top-4 lg:h-[calc(100vh-10rem)]">
               <div className="flex items-center justify-between px-6 py-4 border-b">
                 <h2 className="text-lg font-semibold text-gray-800">引理列表 ({filteredLemmas.length})</h2>
-                <button
-                  onClick={handleCreateLemma}
-                  className="text-blue-600 hover:text-blue-800 flex items-center"
-                >
-                  <FaPlus className="mr-1" /> 新建
-                </button>
+            {/* Lemma creation/edit buttons are not required; removed */}
               </div>
               <div className="px-6 py-3 border-b">
                 <div className="relative">

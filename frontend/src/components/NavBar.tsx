@@ -2,13 +2,14 @@
 
 import React, { useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { FaBook, FaSearch, FaCog, FaSignOutAlt, FaUser } from 'react-icons/fa';
+import { FaBook, FaCog, FaSignOutAlt, FaUser, FaQuestionCircle } from 'react-icons/fa';
+import HelpModal from './HelpModal';
 import { useRouter } from 'next/navigation';
 
 export default function NavBar() {
   const router = useRouter();
-  const [searchQuery, setSearchQuery] = useState('');
-  const { fullName, logout } = useAuth();
+  const { fullName, role, credits, logout } = useAuth();
+  const [showHelp, setShowHelp] = useState(false);
   const userName = fullName ?? '访客';
 
   const handleSignOut = async () => {
@@ -30,30 +31,22 @@ export default function NavBar() {
             <FaBook className="text-2xl" />
             <span className="text-xl font-bold">AI Mathematician</span>
           </div>
-          <div className="flex-1 max-w-xl mx-4">
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <FaSearch className="text-gray-400" />
-              </div>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                className="block w-full pl-10 pr-3 py-2 text-gray-900 bg-white rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="搜索..."
-              />
-            </div>
-          </div>
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-3">
               <div className="bg-blue-500 w-8 h-8 rounded-full flex items-center justify-center">
-                <FaUser />
+                <FaUser className="text-white" />
               </div>
-              <span className="hidden sm:block">{userName}</span>
+              <div>
+                <div className="text-sm font-medium text-white">{userName}</div>
+                <div className="flex space-x-2 mt-1">
+                  {role && <span className="text-xs uppercase border border-white text-white px-2 py-0.5 rounded">{role}</span>}
+                  {credits && <span className="text-xs border border-white text-white px-2 py-0.5 rounded">{credits}</span>}
+                </div>
+              </div>
             </div>
             <button
               className="text-blue-200 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center"
-              onClick={() => console.log('Settings')}
+              onClick={() => {/* settings not implemented */}}
             >
               <FaCog className="mr-1" />
               <span className="hidden md:block">设置</span>
@@ -65,7 +58,15 @@ export default function NavBar() {
               <FaSignOutAlt className="mr-1" />
               <span className="hidden md:block">退出</span>
             </button>
+            <button
+              className="text-blue-200 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center"
+              onClick={() => setShowHelp(true)}
+            >
+              <FaQuestionCircle className="mr-1" />
+              <span className="hidden md:block">帮助</span>
+            </button>
           </div>
+          <HelpModal show={showHelp} onClose={() => setShowHelp(false)} />
         </div>
       </div>
     </nav>

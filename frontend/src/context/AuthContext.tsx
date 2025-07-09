@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 interface AuthContextType {
   token: string | null;
   fullName: string | null;
+  role: string | null;
+  credits: string | null;
   login: (token: string) => Promise<void>;
   logout: () => void;
 }
@@ -14,20 +16,24 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [fullName, setFullName] = useState<string | null>(null);
+  const [role, setRole] = useState<string | null>(null);
+  const [credits, setCredits] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => {
     const t = localStorage.getItem('token');
     if (t) {
       setToken(t);
-      // fetch user info
+      // fetch user info including role & credits
       fetch('/api/me', {
         headers: { 'Authorization': `Bearer ${t}` }
       })
         .then(res => res.json())
         .then(data => {
-          if (data.success && data.full_name) {
-            setFullName(data.full_name);
+          if (data.success) {
+            setFullName(data.full_name ?? null);
+            setRole(data.role ?? null);
+            setCredits(data.credits ?? null);
           }
         });
     }
@@ -40,10 +46,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const res = await fetch('/api/me', { headers: { 'Authorization': `Bearer ${t}` } });
       const data = await res.json();
-      if (data.success && data.full_name) {
-        setFullName(data.full_name);
+      if (data.success) {
+        setFullName(data.full_name ?? null);
+        setRole(data.role ?? null);
+        setCredits(data.credits ?? null);
       }
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to fetch user info after login', err);
+    }
     router.push('/');
   };
 
@@ -55,7 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ token, fullName, login, logout }}>
+    <AuthContext.Provider value={{ token, fullName, role, credits, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

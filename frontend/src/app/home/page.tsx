@@ -15,6 +15,7 @@ interface Project {
   created_at: string;
   last_active: string;
   lemmas_count: number;
+  status: string;
 }
 
 // Format ISO date to localized date string (e.g. "2023/10/19")
@@ -60,8 +61,10 @@ const HomePage: React.FC = () => {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`);
-        const data: Project[] = await res.json();
-        setProjects(data);
+        // parse projects and normalize missing status
+        type RawProject = Omit<Project, 'status'> & { status?: string };
+        const raw = (await res.json()) as RawProject[];
+        setProjects(raw.map(p => ({ ...p, status: p.status ?? 'ended' })) as Project[]);
       } catch (err: unknown) {
         if (err instanceof Error) setError(err.message)
         else setError(String(err) || 'Error loading projects');
@@ -82,6 +85,15 @@ const HomePage: React.FC = () => {
     project.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     project.problem.toLowerCase().includes(searchQuery.toLowerCase())
   );
+  // Map status to badge styles
+  const statusClass = (status: string) => {
+    switch (status) {
+      case 'running': return 'bg-blue-100 text-blue-800';
+      case 'solved': return 'bg-green-100 text-green-800';
+      case 'ended': return 'bg-gray-100 text-gray-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
@@ -128,8 +140,11 @@ const HomePage: React.FC = () => {
             >
               <div className="p-6">
                 <div className="flex justify-between items-start mb-3">
-                  <h3 className="text-xl font-semibold text-gray-800 truncate max-w-[70%]">{project.title}</h3>
-                  <span className="text-xs text-gray-500">{formatDate(project.created_at)}</span>
+                  <h3 className="text-xl font-semibold text-gray-800 truncate max-w-[60%]">{project.title}</h3>
+                  <div className="flex items-center space-x-2">
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium uppercase ${statusClass(project.status)}`}>{project.status}</span>
+                    <span className="text-xs text-gray-500">{formatDate(project.created_at)}</span>
+                  </div>
                 </div>
                 <p className="text-gray-600 mb-4 h-14 line-clamp-2">{project.problem}</p>
                 <div className="flex justify-between text-sm text-gray-500">

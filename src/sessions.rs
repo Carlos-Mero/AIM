@@ -605,7 +605,7 @@ impl Session for ResearchSession {
         // initial lemma count from memory blocks
         let init_lemmas = self.memory.memory.iter().filter(|m| m.memtype == "lemma").count() as i32;
         let insert_sql = format!(
-            "INSERT INTO projects (user_id, title, problem, context, config, memory, created_at, last_active, lemmas_count) VALUES ({}, '{}', '{}', '{}', '{}', '{}', '{}', '{}', {})",
+            "INSERT INTO projects (user_id, title, problem, context, config, memory, created_at, last_active, lemmas_count, status) VALUES ({}, '{}', '{}', '{}', '{}', '{}', '{}', '{}', {}, 'running')",
             user_id,
             title,
             self.config.problem.replace("'", "''"),
@@ -618,6 +618,7 @@ impl Session for ResearchSession {
         );
         db.execute(Statement::from_string(DbBackend::Sqlite, insert_sql)).await?;
         // Exploration loop: update memory after each step
+        let mut solved_flag = false;
         for _ in 0..self.config.steps {
             let done = if self.config.theorem_graph_mode {
                 self.graph_step().await?
@@ -636,9 +637,19 @@ impl Session for ResearchSession {
                 user_id,
                 ts,
             );
-            db.execute(Statement::from_string(DbBackend::Sqlite, upd_sql)).await?;
-            if done { break; }
+        db.execute(Statement::from_string(DbBackend::Sqlite, upd_sql)).await?;
+            if done {
+                solved_flag = true;
+                break;
+            }
         }
+        // After exploration loop, update final status: solved if a theorem was found, else ended
+        let status = if solved_flag { "solved" } else { "ended" };
+        let status_sql = format!(
+            "UPDATE projects SET status='{}' WHERE user_id={} AND created_at='{}'",
+            status, user_id, ts
+        );
+        db.execute(Statement::from_string(DbBackend::Sqlite, status_sql)).await?;
         Ok(())
     }
 }

@@ -32,6 +32,11 @@ AIM uses `dotenv` to configure API-keys for this agentic system. You need to cre
 OPENAI_API_KEY=sk-xxxxxx
 # Optional
 OPENAI_API_BASEURL=https://api.openai.com
+# Role & Invitation Codes (optional)
+# Specify an admin account that bypasses project limits:
+AIM_ADMIN_EMAIL=admin@example.com
+# Specify the invitation code for "invited" users (max 3 new projects per day):
+AIM_INV_CODE=your-invite-code
 ```
 
 After this you will be able to run `aim` in your project without environment errors.

@@ -63,12 +63,17 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::Builder::from_env(env_logger::Env::default()
-        .default_filter_or("info"))
-        .target(env_logger::Target::Stdout)
-        .init();
-
     let cli = Cli::parse();
+    use log::LevelFilter;
+    // Initialize logger: default to 'info', but in --server mode silence agents & sessions to 'error'
+    let env = env_logger::Env::default().default_filter_or("info");
+    let mut builder = env_logger::Builder::from_env(env);
+    builder.target(env_logger::Target::Stdout);
+    if cli.server {
+        builder.filter_module("aim::agents", LevelFilter::Error);
+        builder.filter_module("aim::sessions", LevelFilter::Error);
+    }
+    builder.init();
 
     let mut aim = AIM::new();
     if let Some(p) = cli.problem.as_deref() {

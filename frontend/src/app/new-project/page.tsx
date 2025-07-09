@@ -48,9 +48,11 @@ export default function NewProjectPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       // submission succeeded, navigate home or to new project page
       router.push('/');
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Failed to submit project:', err);
-      // TODO: show user-facing error message
+      // show a pop-up alert on failure
+      const msg = err instanceof Error ? err.message : String(err);
+      window.alert(`创建项目失败：${msg}`);
     }
   };
 

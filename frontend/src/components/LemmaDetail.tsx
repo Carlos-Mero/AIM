@@ -4,7 +4,7 @@ import React from 'react';
 import Lemma from '@/interfaces/Lemma';
 import { BlockMath, InlineMath } from 'react-katex';
 import 'katex/dist/katex.min.css';
-import { FaCheck, FaHourglassHalf, FaTimes, FaEdit } from 'react-icons/fa';
+import { FaCheck, FaHourglassHalf, FaTimes } from 'react-icons/fa';
 
 interface LemmaDetailProps {
   lemma: Lemma;
@@ -161,9 +161,6 @@ const LemmaDetail: React.FC<LemmaDetailProps> = ({ lemma }) => {
             </div>
           </div>
           
-          <button className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700 transition-colors">
-            <FaEdit className="mr-2" /> 编辑
-          </button>
         </div>
 
         {/* 引理陈述 - 支持行内/块级公式，避免 <div> 嵌套在 <p> */}
