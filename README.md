@@ -68,17 +68,17 @@ AIM supports both a single-session CLI workflow and a long-running server mode f
    ```sh
    aim --server
    ```
-   Starts an HTTP API on port 7878 by default. Endpoints allow you to submit problems, stream progress, and fetch results.
+   Starts an HTTP API on port 4000 by default. Endpoints allow you to submit problems, stream progress, and fetch results.
 
 2. Web Frontend
    A Next.js frontend is provided under `./frontend`. To launch:
    ```sh
    cd frontend
    npm install
-   echo "NEXT_PUBLIC_API_BASE_URL=http://localhost:7878" > .env.local
+   echo "NEXT_PUBLIC_API_BASE_URL=http://localhost:4000" > .env.local
    npm run dev
    ```
-   Open http://localhost:3000 to start new sessions, visualize theorem graphs, explore proofs, and view logs.
+   Open http://localhost:3000 to start new sessions, visualize theorem graphs, explore proofs, and view logs. You can also run `npm run build` under the frontend folder. This will build up static frontend files of this project. The `aim` executable already equipped with static file serving capability. Then you can directly visiting localhost:4000 when `aim --server` is running.
 
 ### Command-Line Options
 Run `aim --help` for full details. Common flags include:
