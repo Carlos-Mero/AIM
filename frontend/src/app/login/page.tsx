@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { FaUser, FaLock, FaGoogle, FaGithub } from 'react-icons/fa';
+import { FaUser, FaLock, FaGithub } from 'react-icons/fa';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 
@@ -97,39 +97,23 @@ const Login: React.FC = () => {
             登录
           </button>
           
-          <div className="mt-6">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-300"></div>
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white text-gray-500">或使用其他方式登录</span>
-              </div>
-            </div>
-            
-            <div className="mt-6 grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                className="w-full inline-flex justify-center items-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                <FaGoogle className="text-red-500 mr-2" />
-                Google
-              </button>
-              <button
-                type="button"
-                className="w-full inline-flex justify-center items-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                <FaGithub className="text-gray-800 mr-2" />
-                GitHub
-              </button>
-            </div>
-          </div>
           
           <p className="mt-8 text-center text-sm text-gray-600">
             还没有账户?{' '}
             <Link href="/signup" className="font-medium text-blue-600 hover:text-blue-500">
               立即注册
             </Link>
+          </p>
+          <p className="mt-4 text-center text-sm text-gray-600">
+            <a
+              href="https://github.com/Carlos-Mero/AIM/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center font-medium text-gray-700 hover:text-gray-900"
+            >
+              <FaGithub className="mr-1" />
+              View source on GitHub
+            </a>
           </p>
         </form>
       </div>

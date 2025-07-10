@@ -425,7 +425,9 @@ impl ResearchSession {
             }
         }
 
-        if self.memory.memory[memid].is_solved() && self.memory.memory[memid].memtype == "theorem" {
+        if self.memory.memory[memid].is_solved()
+        && self.memory.memory[memid].memtype == "theorem"
+        && self.memory.memory[memid].content == self.config.problem {
             return Ok(true);
         }
         return Ok(false);
