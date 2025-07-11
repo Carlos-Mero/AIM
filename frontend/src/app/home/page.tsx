@@ -51,33 +51,38 @@ const HomePage: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   
-  // Load projects on mount and every 3 minutes
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      try {
-        const token = localStorage.getItem('token');
-        const res = await fetch('/api/projects', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`);
-        // parse projects and normalize missing status
-        type RawProject = Omit<Project, 'status'> & { status?: string };
-        const raw = (await res.json()) as RawProject[];
-        setProjects(raw.map(p => ({ ...p, status: p.status ?? 'ended' })) as Project[]);
-      } catch (err: unknown) {
-        if (err instanceof Error) setError(err.message)
-        else setError(String(err) || 'Error loading projects');
-      } finally {
-        setLoading(false);
+  // Pagination state and data loader
+  const PAGE_SIZE = 48;
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  // Load a page of projects
+  const loadProjects = async (start: number) => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/projects?limit=${PAGE_SIZE}&offset=${start}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`);
+      type RawProject = Omit<Project, 'status'> & { status?: string };
+      const raw = (await res.json()) as RawProject[];
+      const parsed = raw.map(p => ({ ...p, status: p.status ?? 'ended' })) as Project[];
+      if (start === 0) {
+        setProjects(parsed);
+      } else {
+        setProjects(prev => [...prev, ...parsed]);
       }
-    };
-    // initial load
-    load();
-    // interval reload
-    const timer = setInterval(load, 3 * 60 * 1000);
-    return () => clearInterval(timer);
-  }, []);
+      setOffset(start + parsed.length);
+      setHasMore(parsed.length === PAGE_SIZE);
+    } catch (err: unknown) {
+      if (err instanceof Error) setError(err.message);
+      else setError(String(err) || 'Error loading projects');
+    } finally {
+      setLoading(false);
+    }
+  };
+  // initial load
+  useEffect(() => { loadProjects(0); }, []);
 
 
   // 过滤项目函数
@@ -131,8 +136,9 @@ const HomePage: React.FC = () => {
               </button>
             </div>
           ) : (
+            <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredProjects.map((project) => (
+              {filteredProjects.map((project) => (
             <div
               key={project.id}
               className="block bg-white rounded-2xl shadow-md overflow-hidden hover:shadow-lg transition-shadow cursor-pointer"
@@ -179,6 +185,16 @@ const HomePage: React.FC = () => {
             </div>
           ))}
             </div>
+            {hasMore && (
+              <div className="flex justify-center mt-6">
+                <button
+                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                  onClick={() => loadProjects(offset)}
+                  disabled={loading}
+                >加载更多</button>
+              </div>
+            )}
+            </>
           )}
         </div>
       </main>

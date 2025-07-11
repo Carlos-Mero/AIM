@@ -441,10 +441,19 @@ struct ProjectInfo {
     status: String,
 }
 
-/// GET /api/projects: list all projects for the authenticated user
+/// Query params for project listing pagination
+#[derive(Deserialize)]
+struct ListProjectsQuery {
+    /// Maximum number of projects to return
+    limit: Option<u32>,
+    /// Number of projects to skip
+    offset: Option<u32>,
+}
+/// GET /api/projects: list projects for the authenticated user with pagination
 async fn handle_list_projects(
     db: web::Data<DatabaseConnection>,
     req: HttpRequest,
+    query: web::Query<ListProjectsQuery>,
 ) -> impl Responder {
     let auth_header = req.headers().get("Authorization").and_then(|v| v.to_str().ok()).unwrap_or("");
     if !auth_header.starts_with("Bearer ") {
@@ -457,8 +466,14 @@ async fn handle_list_projects(
         Err(_) => return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Invalid token".into(), token: None }),
     };
     let user_id = claims.sub;
+    // apply pagination: default limit 48, default offset 0
+    let limit = query.limit.unwrap_or(48);
+    let offset = query.offset.unwrap_or(0);
     let sql = format!(
-        "SELECT id, title, problem, context, created_at, last_active, lemmas_count, status FROM projects WHERE user_id={} ORDER BY last_active DESC", user_id
+        "SELECT id, title, problem, context, created_at, last_active, lemmas_count, status \
+         FROM projects WHERE user_id={} ORDER BY last_active DESC \
+         LIMIT {} OFFSET {}",
+        user_id, limit, offset
     );
     match db.get_ref().query_all(Statement::from_string(DbBackend::Sqlite, sql)).await {
         Ok(rows) => {
@@ -500,11 +515,12 @@ async fn handle_get_project(
     };
     let user_id = claims.sub;
     let project_id = path.into_inner().0;
-    // Query project
-    // include status column
+    // Query project: include hyperparameter config and creator name via join
+    // Build SQL in one line to avoid escape issues
     let sql = format!(
-        "SELECT id, title, problem, context, memory, created_at, last_active, lemmas_count, status FROM projects WHERE id={} AND user_id={} LIMIT 1",
-        project_id, user_id
+        "SELECT p.id, p.title, p.problem, p.context, p.memory, p.config, p.created_at, p.last_active, p.lemmas_count, p.status, u.full_name AS creator FROM projects p JOIN users u ON p.user_id = u.id WHERE p.id={} AND p.user_id={} LIMIT 1",
+        project_id,
+        user_id,
     );
     match db.get_ref().query_one(Statement::from_string(DbBackend::Sqlite, sql)).await {
         Ok(Some(row)) => {
@@ -514,11 +530,13 @@ async fn handle_get_project(
             let problem: String = row.try_get("", "problem").unwrap_or_default();
             let context: Option<String> = row.try_get("", "context").ok().flatten();
             let mem_json: String = row.try_get("", "memory").unwrap_or_default();
+            let config_json: String = row.try_get("", "config").unwrap_or_default();
             let memory: Vec<crate::agents::MemoryBlock> = serde_json::from_str(&mem_json).unwrap_or_default();
             let created_at: String = row.try_get("", "created_at").unwrap_or_default();
             let last_active: String = row.try_get("", "last_active").unwrap_or_default();
             let lemmas_count: i32 = row.try_get("", "lemmas_count").unwrap_or_default();
             let status: String = row.try_get("", "status").unwrap_or_else(|_| "running".to_string());
+            let creator: String = row.try_get("", "creator").unwrap_or_default();
             #[derive(Serialize)]
             struct ProjectDetail {
                 id: i32,
@@ -530,8 +548,10 @@ async fn handle_get_project(
                 last_active: String,
                 lemmas_count: i32,
                 status: String,
+                config: String,
+                creator: String,
             }
-            let detail = ProjectDetail { id, title, problem, context, memory, created_at, last_active, lemmas_count, status };
+            let detail = ProjectDetail { id, title, problem, context, memory, created_at, last_active, lemmas_count, status, config: config_json, creator };
             HttpResponse::Ok().json(detail)
         }
         Ok(None) => HttpResponse::NotFound().json(ApiResponse { success: false, message: "Project not found".into(), token: None }),

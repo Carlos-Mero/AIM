@@ -54,7 +54,13 @@ const HelpModal: React.FC<HelpModalProps> = ({ show, onClose }) => {
           </p>
           <h3 className="font-semibold">更多帮助</h3>
           <p>
-            如有疑问或建议，请在 GitHub 仓库提交 Issue，或加入讨论与我们联系。
+            如有疑问或建议，请在{' '}
+            <a
+              href="https://github.com/Carlos-Mero/AIM/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline"
+            >GitHub 仓库</a> 提交 Issue，或加入讨论与我们联系。
           </p>
         </div>
       </div>

@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { FaBook, FaCog, FaSignOutAlt, FaUser, FaQuestionCircle, FaGithub } from 'react-icons/fa';
+import { FaBook, FaCog, FaSignOutAlt, FaUser, FaQuestionCircle } from 'react-icons/fa';
 import HelpModal from './HelpModal';
 import { useRouter } from 'next/navigation';
 
@@ -32,15 +32,6 @@ export default function NavBar() {
             <span className="text-xl font-bold">AI Mathematician</span>
           </div>
           <div className="flex items-center space-x-4">
-            <a
-              href="https://github.com/Carlos-Mero/AIM/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-200 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center"
-            >
-              <FaGithub className="mr-1" />
-              <span className="hidden md:block">GitHub</span>
-            </a>
             <div className="flex items-center space-x-3">
               <div className="bg-blue-500 w-8 h-8 rounded-full flex items-center justify-center">
                 <FaUser className="text-white" />

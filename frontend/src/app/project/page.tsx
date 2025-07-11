@@ -69,14 +69,42 @@ interface Project {
     comment: string;
     deps: number[];
   }>;
+  // Hyperparameter settings JSON string
+  config: string;
+  // Project creator's full name
+  creator: string;
 }
 
+// Type for project config serialized from backend (snake_case keys)
+interface ProjectConfig {
+  proof_model: string;
+  eval_model: string;
+  reform_model: string;
+  steps: number;
+  reviews: number;
+  iterations: number;
+  reformat: boolean;
+  theorem_graph_mode: boolean;
+}
 const ProjectDetailContent: React.FC = () => {
   // read projectId from query string
   const searchParams = useSearchParams();
   const projectId = searchParams.get('projectId');
   const { token } = useAuth();
   const [project, setProject] = useState<Project | null>(null);
+  // parsed config object from project.config
+  const [configObj, setConfigObj] = useState<ProjectConfig | null>(null);
+  const [showConfig, setShowConfig] = useState(false);
+  // Parse config JSON into object
+  useEffect(() => {
+    if (project) {
+      try {
+        setConfigObj(JSON.parse(project.config));
+      } catch {
+        setConfigObj(null);
+      }
+    }
+  }, [project]);
   const [selectedLemma, setSelectedLemma] = useState<Lemma | null>(null);
   const [filter, setFilter] = useState<string>('');
   const [lemmas, setLemmas] = useState<Lemma[]>([]);
@@ -167,9 +195,11 @@ const ProjectDetailContent: React.FC = () => {
     <div className="flex flex-col min-h-screen bg-gray-50">
       <NavBar />
       <main className="flex-1 container mx-auto px-4 py-6">
-        {/* 项目信息 */}
-        <div className="bg-white rounded-2xl shadow p-6 mb-6">
+      {/* 项目信息 */}
+        <div className="bg-white rounded-2xl shadow p-6 mb-6 relative">
           <h1 className="text-2xl font-bold text-gray-800">{project.title}</h1>
+          {/* Creator at top-right */}
+          <div className="absolute top-4 right-6 text-sm text-gray-500">创建者：{project.creator}</div>
           <div className="mt-2 text-gray-600 prose">
             {renderDescription(project.problem)}
           </div>
@@ -181,14 +211,87 @@ const ProjectDetailContent: React.FC = () => {
               </div>
             </div>
           )}
-        <div className="mt-3 flex items-center space-x-4">
-          <div className="text-sm text-gray-500 flex items-center">
-            <FaInfoCircle className="mr-1" />
-            <span>创建于 {formatDate(project.created_at)} · 最后活跃 {timeAgo(project.last_active)}</span>
+          <div className="mt-3 flex items-center space-x-4">
+            <div className="text-sm text-gray-500 flex items-center">
+              <FaInfoCircle className="mr-1" />
+              <span>创建于 {formatDate(project.created_at)} · 最后活跃 {timeAgo(project.last_active)}</span>
+            </div>
+            <span className={`px-2 py-1 rounded-full text-xs font-medium uppercase ${statusClass(project.status)}`}>{project.status}</span>
           </div>
-          <span className={`px-2 py-1 rounded-full text-xs font-medium uppercase ${statusClass(project.status)}`}>{project.status}</span>
+          {/* View settings toggle */}
+          <div className="absolute bottom-4 right-4">
+            <button
+              className="px-3 py-1 bg-gray-100 text-gray-800 rounded hover:bg-gray-200 text-sm"
+              onClick={() => setShowConfig(prev => !prev)}
+            >{showConfig ? '隐藏设置' : '查看设置'}</button>
+          </div>
         </div>
-        </div>
+        {/* 配置面板，与新建项目一致样式，仅读 */}
+        {showConfig && configObj && (
+          <div className="space-y-4 bg-gray-50 p-4 rounded-md border border-gray-200 mb-6">
+            <h3 className="font-semibold">项目设置</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm text-gray-700">Proof Model</label>
+                <input
+                  value={configObj.proof_model}
+                  readOnly
+                  className="w-full border rounded p-1 bg-gray-50 text-gray-700"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-700">Eval Model</label>
+                <input
+                  value={configObj.eval_model}
+                  readOnly
+                  className="w-full border rounded p-1 bg-gray-50 text-gray-700"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-700">Reform Model</label>
+                <input
+                  value={configObj.reform_model}
+                  readOnly
+                  className="w-full border rounded p-1 bg-gray-50 text-gray-700"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-700">Steps</label>
+                <input
+                  value={configObj.steps}
+                  readOnly
+                  className="w-full border rounded p-1 bg-gray-50 text-gray-700"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-700">Reviews</label>
+                <input
+                  value={configObj.reviews}
+                  readOnly
+                  className="w-full border rounded p-1 bg-gray-50 text-gray-700"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-700">Iterations</label>
+                <input
+                  value={configObj.iterations}
+                  readOnly
+                  className="w-full border rounded p-1 bg-gray-50 text-gray-700"
+                />
+              </div>
+            </div>
+            <div className="flex items-center space-x-4 text-gray-700">
+              <label className="flex items-center space-x-2">
+                <input type="checkbox" checked={configObj.reformat} disabled />
+                <span className="text-sm">Reformat conjectures</span>
+              </label>
+              <label className="flex items-center space-x-2">
+                <input type="checkbox" checked={configObj.theorem_graph_mode} disabled />
+                <span className="text-sm">Theorem graph mode</span>
+              </label>
+            </div>
+          </div>
+        )}
           {/* 主体区域：列表 & 详情 */}
           <div className="flex flex-col lg:flex-row gap-6 h-full">
             {/* 左侧：列表区 */}
