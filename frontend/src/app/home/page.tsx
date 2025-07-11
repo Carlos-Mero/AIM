@@ -16,6 +16,8 @@ interface Project {
   last_active: string;
   lemmas_count: number;
   status: string;
+  // Optional creator name (admin view)
+  creator?: string;
 }
 
 // Format ISO date to localized date string (e.g. "2023/10/19")
@@ -40,7 +42,8 @@ function timeAgo(iso: string) {
 }
 const HomePage: React.FC = () => {
   // Get current user name from auth context
-  const { fullName } = useAuth();
+  const { fullName, role } = useAuth();
+  const isAdmin = role?.toLowerCase() === 'admin';
   const userName = fullName ?? '访客';
   // useEffect(() => {
   //   if (!token) router.push('/login');
@@ -64,9 +67,13 @@ const HomePage: React.FC = () => {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`);
-      type RawProject = Omit<Project, 'status'> & { status?: string };
+      type RawProject = Omit<Project, 'status' | 'creator'> & { status?: string; creator?: string };
       const raw = (await res.json()) as RawProject[];
-      const parsed = raw.map(p => ({ ...p, status: p.status ?? 'ended' })) as Project[];
+      const parsed = raw.map(p => ({
+        ...p,
+        status: p.status ?? 'ended',
+        creator: p.creator,
+      })) as Project[];
       if (start === 0) {
         setProjects(parsed);
       } else {
@@ -161,27 +168,29 @@ const HomePage: React.FC = () => {
                   <span>{timeAgo(project.last_active)}</span>
                 </div>
               </div>
-              <div className="bg-gray-50 px-6 py-3 border-t border-gray-100 flex justify-between items-center">
-                <span
-                  className="text-blue-600 hover:text-blue-800 font-medium"
-                  onClick={e => { e.stopPropagation(); router.push(`/project?projectId=${project.id}`); }}
-                >
-                  查看项目详情
-                </span>
-                <button
-                  className="text-gray-500 hover:text-gray-700 font-medium"
-                  onClick={async e => {
-                    e.stopPropagation();
-                    if (!window.confirm('确认要删除该项目吗？此操作不可撤销。')) return;
-                    const token = localStorage.getItem('token');
-                    const res = await fetch(`/api/project/${project.id}`, {
-                      method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` }
-                    });
-                    if (res.ok) setProjects(prev => prev.filter(p => p.id !== project.id));
-                    else alert('删除失败');
-                  }}
-                >删除</button>
-              </div>
+          <div className="bg-gray-50 px-6 py-3 border-t border-gray-100 flex justify-between items-center">
+            {isAdmin ? (
+              <span className="text-gray-700 text-sm">创建者：{project.creator || '---'}</span>
+            ) : (
+              <span
+                className="text-blue-600 hover:text-blue-800 font-medium cursor-pointer"
+                onClick={e => { e.stopPropagation(); router.push(`/project?projectId=${project.id}`); }}
+              >查看项目详情</span>
+            )}
+            <button
+              className="text-gray-500 hover:text-gray-700 font-medium"
+              onClick={async e => {
+                e.stopPropagation();
+                if (!window.confirm('确认要删除该项目吗？此操作不可撤销。')) return;
+                const token = localStorage.getItem('token');
+                const res = await fetch(`/api/project/${project.id}`, {
+                  method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.ok) setProjects(prev => prev.filter(p => p.id !== project.id));
+                else alert('删除失败');
+              }}
+            >删除</button>
+          </div>
             </div>
           ))}
             </div>

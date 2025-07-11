@@ -7,7 +7,7 @@ import NavBar from '@/components/NavBar';
 
 export default function NewProjectPage() {
   const router = useRouter();
-  const { token } = useAuth();
+  const { token, refresh } = useAuth();
   const [title, setTitle] = useState<string>('');
   const [problem, setProblem] = useState<string>('');
   const [context, setContext] = useState<string>('');
@@ -46,7 +46,9 @@ export default function NewProjectPage() {
         body: JSON.stringify(config),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      // submission succeeded, navigate home or to new project page
+      // submission succeeded: refresh user info (credits/role)
+      await refresh();
+      // then navigate home
       router.push('/');
     } catch (err: unknown) {
       console.error('Failed to submit project:', err);

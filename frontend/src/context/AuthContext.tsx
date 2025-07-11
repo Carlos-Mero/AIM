@@ -9,6 +9,8 @@ interface AuthContextType {
   credits: string | null;
   login: (token: string) => Promise<void>;
   logout: () => void;
+  // Refresh user info (reload tokens, fullName, role, credits)
+  refresh: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -39,6 +41,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const refresh = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch('/api/me', { headers: { 'Authorization': `Bearer ${token}` } });
+      const data = await res.json();
+      if (data.success) {
+        setFullName(data.full_name ?? null);
+        setRole(data.role ?? null);
+        setCredits(data.credits ?? null);
+      }
+    } catch (err) {
+      console.warn('Failed to refresh user info', err);
+    }
+  };
   const login = async (t: string) => {
     localStorage.setItem('token', t);
     setToken(t);
@@ -65,7 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ token, fullName, role, credits, login, logout }}>
+    <AuthContext.Provider value={{ token, fullName, role, credits, login, logout, refresh }}>
       {children}
     </AuthContext.Provider>
   );

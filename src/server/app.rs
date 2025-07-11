@@ -439,6 +439,7 @@ struct ProjectInfo {
     last_active: String,
     lemmas_count: i32,
     status: String,
+    creator: String,
 }
 
 /// Query params for project listing pagination
@@ -466,15 +467,28 @@ async fn handle_list_projects(
         Err(_) => return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Invalid token".into(), token: None }),
     };
     let user_id = claims.sub;
+    let user_email = claims.email.clone();
+    // determine if admin (bypass project filters)
+    let is_admin = std::env::var("AIM_ADMIN_EMAIL").map(|e| e == user_email).unwrap_or(false);
     // apply pagination: default limit 48, default offset 0
     let limit = query.limit.unwrap_or(48);
     let offset = query.offset.unwrap_or(0);
-    let sql = format!(
-        "SELECT id, title, problem, context, created_at, last_active, lemmas_count, status \
-         FROM projects WHERE user_id={} ORDER BY last_active DESC \
-         LIMIT {} OFFSET {}",
-        user_id, limit, offset
-    );
+    // build SQL, join to users to get creator name
+    let sql = if is_admin {
+        format!(
+            "SELECT p.id, p.title, p.problem, p.context, p.created_at, p.last_active, p.lemmas_count, p.status, u.full_name AS creator \
+             FROM projects p JOIN users u ON p.user_id = u.id \
+             ORDER BY p.last_active DESC LIMIT {} OFFSET {}",
+            limit, offset
+        )
+    } else {
+        format!(
+            "SELECT p.id, p.title, p.problem, p.context, p.created_at, p.last_active, p.lemmas_count, p.status, u.full_name AS creator \
+             FROM projects p JOIN users u ON p.user_id = u.id \
+             WHERE p.user_id={} ORDER BY p.last_active DESC LIMIT {} OFFSET {}",
+            user_id, limit, offset
+        )
+    };
     match db.get_ref().query_all(Statement::from_string(DbBackend::Sqlite, sql)).await {
         Ok(rows) => {
             let mut list = Vec::new();
@@ -487,7 +501,8 @@ async fn handle_list_projects(
                 let last_active: String = row.try_get("", "last_active").unwrap_or_default();
                 let lemmas_count: i32 = row.try_get("", "lemmas_count").unwrap_or_default();
                 let status: String = row.try_get("", "status").unwrap_or_else(|_| "running".to_string());
-                list.push(ProjectInfo { id, title, problem, context, created_at, last_active, lemmas_count, status });
+                let creator: String = row.try_get("", "creator").unwrap_or_default();
+                list.push(ProjectInfo { id, title, problem, context, created_at, last_active, lemmas_count, status, creator });
             }
             HttpResponse::Ok().json(list)
         }
@@ -513,15 +528,23 @@ async fn handle_get_project(
         Ok(data) => data.claims,
         Err(_) => return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Invalid token".into(), token: None }),
     };
+    // Check if the user is an admin to allow access to all projects
     let user_id = claims.sub;
+    let user_email = claims.email;
+    let is_admin = std::env::var("AIM_ADMIN_EMAIL").map(|e| e == user_email).unwrap_or(false);
     let project_id = path.into_inner().0;
-    // Query project: include hyperparameter config and creator name via join
-    // Build SQL in one line to avoid escape issues
-    let sql = format!(
-        "SELECT p.id, p.title, p.problem, p.context, p.memory, p.config, p.created_at, p.last_active, p.lemmas_count, p.status, u.full_name AS creator FROM projects p JOIN users u ON p.user_id = u.id WHERE p.id={} AND p.user_id={} LIMIT 1",
-        project_id,
-        user_id,
-    );
+    // Build SQL to fetch project details, including creator name
+    let sql = if is_admin {
+        format!(
+            "SELECT p.id, p.title, p.problem, p.context, p.memory, p.config, p.created_at, p.last_active, p.lemmas_count, p.status, u.full_name AS creator FROM projects p JOIN users u ON p.user_id = u.id WHERE p.id={} LIMIT 1",
+            project_id
+        )
+    } else {
+        format!(
+            "SELECT p.id, p.title, p.problem, p.context, p.memory, p.config, p.created_at, p.last_active, p.lemmas_count, p.status, u.full_name AS creator FROM projects p JOIN users u ON p.user_id = u.id WHERE p.id={} AND p.user_id={} LIMIT 1",
+            project_id, user_id
+        )
+    };
     match db.get_ref().query_one(Statement::from_string(DbBackend::Sqlite, sql)).await {
         Ok(Some(row)) => {
             // Unpack project fields, including status
