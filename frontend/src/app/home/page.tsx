@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import NavBar from '@/components/NavBar';
 import Link from 'next/link';
-import { FaPlus } from 'react-icons/fa';
+import { FaPlus, FaSync } from 'react-icons/fa';
 
 interface Project {
   id: number;
@@ -53,6 +53,8 @@ const HomePage: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  // Refresh button cooldown state
+  const [refreshDisabled, setRefreshDisabled] = useState<boolean>(false);
   
   // Pagination state and data loader
   const PAGE_SIZE = 48;
@@ -90,6 +92,14 @@ const HomePage: React.FC = () => {
   };
   // initial load
   useEffect(() => { loadProjects(0); }, []);
+  // handler to refresh projects, cooldown 10 seconds
+  const handleRefresh = () => {
+    if (refreshDisabled) return;
+    setRefreshDisabled(true);
+    loadProjects(0);
+    // re-enable after 10 seconds
+    setTimeout(() => setRefreshDisabled(false), 10000);
+  };
 
 
   // 过滤项目函数
@@ -128,9 +138,24 @@ const HomePage: React.FC = () => {
 
         {/* 项目列表 */}
         <div>
-        <h2 className="text-2xl font-semibold text-gray-800 mb-6">您的研究项目 ({projects.length})</h2>
-        {loading && <p className="text-gray-600">加载中...</p>}
-        {error && <p className="text-red-600">{error}</p>}
+          {/* 标题与刷新按钮 */}
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-2xl font-semibold text-gray-800">您的研究项目 ({projects.length})</h2>
+            <button
+              onClick={handleRefresh}
+              disabled={refreshDisabled}
+              className={
+                `flex items-center py-2 px-4 rounded-lg font-medium transition-opacity shadow-md ` +
+                (refreshDisabled
+                  ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                  : 'bg-gray-200 text-gray-800 hover:bg-gray-300')
+              }
+            >
+              <FaSync className={loading ? 'mr-2 animate-spin' : 'mr-2'} /> 刷新
+            </button>
+          </div>
+          {loading && <p className="text-gray-600">加载中...</p>}
+          {error && <p className="text-red-600">{error}</p>}
           
           {filteredProjects.length === 0 ? (
             <div className="bg-white rounded-2xl shadow-md p-8 text-center">
