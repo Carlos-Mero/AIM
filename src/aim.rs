@@ -1,6 +1,7 @@
 use tokio::task::JoinSet;
 
 use crate::sessions::{Session, ResearchSessionConfig, ResearchSession};
+use crate::server;
 
 use log::{info, error};
 
@@ -15,9 +16,9 @@ impl AIM {
         }
     }
 
-    pub async fn run_tui(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        error!("Interactive Mode in CLI, not implemented yet!");
-        panic!();
+    pub async fn runserver(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        server::app::run().await?;
+        Ok(())
     }
 
     pub async fn run_session(&mut self, config: ResearchSessionConfig) ->  Result<(), Box<dyn std::error::Error>> {

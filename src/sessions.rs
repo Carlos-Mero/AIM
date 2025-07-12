@@ -5,17 +5,30 @@ use std::sync::Arc;
 use crate::agents::{Agent, Explorer, Reviewer, Refiner, Formatter, MemoryBlock, Memory};
 use crate::utils::{extract_component, extract_all_component, find_box};
 use indicatif::{ProgressBar, ProgressStyle};
+use tokio::task::JoinSet;
 
 use log::{info, warn, debug, error};
 use serde::{Serialize, Deserialize};
+use sea_orm::{DatabaseConnection, Statement, DbBackend, ConnectionTrait};
+use chrono::Utc;
 
 #[async_trait::async_trait]
 pub trait Session: Send {
+    /// Run locally, persisting to filesystem
     async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>>;
+    /// Run remotely, persisting to database
+    async fn remote_run(
+        &mut self,
+        db: &DatabaseConnection,
+        user_id: i32,
+    ) -> Result<(), Box<dyn std::error::Error>>;
 }
 
-#[derive(Default, Serialize, Deserialize)]
+const MAX_REVIEWS_PER_NODE: u8 = 24;
+
+#[derive(Default, Debug, Serialize, Deserialize)]
 pub struct ResearchSessionConfig {
+    title: String,
     logdir: PathBuf,
     proof_model: String,
     eval_model: String,
@@ -25,12 +38,16 @@ pub struct ResearchSessionConfig {
     iterations: u8,
     currect_steps: u32,
     problem: String,
-    resume: bool,
-    streaming: bool,
+    context: String,
+    resume: bool, // resume from existing explore trajectory
+    reformat: bool, // reformat conjectures and proofs after exploration
+    streaming: bool, // streaming output in exploration
+    theorem_graph_mode: bool, // whether to use theorem graph mode
 }
 
 impl ResearchSessionConfig {
     pub fn new() -> Self {Self::default()}
+    pub fn title(mut self, title: impl Into<String>) -> Self { self.title = title.into(); self }
     pub fn proof_model(mut self, proof_model: impl Into<String>) -> Self {self.proof_model = proof_model.into(); self}
     pub fn eval_model(mut self, eval_model: impl Into<String>) -> Self {self.eval_model = eval_model.into(); self}
     pub fn reform_model(mut self, reform_model: impl Into<String>) -> Self {self.reform_model = reform_model.into(); self}
@@ -39,9 +56,12 @@ impl ResearchSessionConfig {
     pub fn reviews(mut self, reviews: u8) -> Self {self.reviews = reviews; self}
     pub fn iterations(mut self, iterations: u8) -> Self {self.iterations = iterations; self}
     pub fn resume(mut self, resume: bool) -> Self {self.resume = resume; self}
+    pub fn reformat(mut self, reformat: bool) -> Self {self.reformat = reformat; self}
     pub fn streaming(mut self, streaming: bool) -> Self {self.streaming = streaming; self}
+    pub fn theorem_graph_mode(mut self, tgm: bool) -> Self {self.theorem_graph_mode = tgm; self}
     pub fn set_current_steps(&mut self, steps: u32) -> &Self {self.currect_steps = steps; self}
     pub fn set_problem(&mut self, problem: impl Into<String>) -> &Self {self.problem = problem.into(); self}
+    pub fn set_context(&mut self, context: impl Into<String>) -> &Self {self.context = context.into(); self}
 
     pub fn save_configs(&self) -> Result<(), Box<dyn std::error::Error>> {
         let serialized_config = serde_json::to_string_pretty(self)?;
@@ -61,7 +81,7 @@ pub struct ResearchSession {
 
 impl ResearchSession {
     pub fn new(config: ResearchSessionConfig) -> Self {
-        info!("Initialized a ResearchSession with config: {:#?}", serde_json::to_string(&config).unwrap());
+        info!("Initialized a ResearchSession with config: {:#?}", config);
         let explorer = Explorer::new()
             .model(&config.proof_model)
             .streaming(config.streaming);
@@ -72,12 +92,20 @@ impl ResearchSession {
         let refiner = Refiner::new()
             .model(&config.proof_model)
             .streaming(config.streaming);
+        let mut mem = Memory::new();
+        if !config.context.is_empty() {
+            mem.update(MemoryBlock::new()
+                .memtype("context")
+                .content(&config.context)
+                .solved(true)
+            );
+        }
         ResearchSession {
             config: config,
             explorer: explorer,
             reviewer: reviewer,
             refiner: refiner,
-            memory: Memory::new(),
+            memory: mem,
         }
     }
 
@@ -89,9 +117,11 @@ impl ResearchSession {
             return Ok(());
         }
         let context = fs::read_to_string(context_path)?;
+        info!("loaded problem context: {:?}", &context);
         self.memory.update(MemoryBlock::new()
             .memtype("context")
             .content(context)
+            .solved(true)
         );
         Ok(())
     }
@@ -109,16 +139,145 @@ impl ResearchSession {
         Ok(())
     }
 
+    pub async fn review_mems(&mut self, ids: &Vec<usize>) -> Option<Vec<Option<String>>> {
+        info!("Start verifying proof path with {} nodes", ids.len());
+        let mut tasks: JoinSet<Option<String>> = JoinSet::new();
+        let mut res: Vec<Option<String>> = Vec::new();
+        for i in ids {
+            let mut reviewer = Reviewer::new()
+                .model(&self.config.eval_model)
+                .reviews(self.config.reviews)
+                .streaming(false);
+            let memblock = &self.memory.memory[*i];
+            let comment = memblock.get_comment().to_string();
+            let memtype = memblock.memtype.to_string();
+            let num_reviews = memblock.get_reviews();
+            if let Some(context) = self.memory.format_deps(*i, false, false) {
+                reviewer.set_context(context);
+            }
+            reviewer.set_conjecture(&memblock.content);
+            reviewer.set_proof(&memblock.proof);
+            let arc_reviewer = Arc::new(reviewer);
+            tasks.spawn(async move {
+                if memtype == "context" || num_reviews >= MAX_REVIEWS_PER_NODE {
+                    return None;
+                }
+                if !comment.is_empty() {
+                    return Some(comment);
+                }
+                return arc_reviewer.pverify().await;
+            });
+        }
+        while let Some(task_result) = tasks.join_next().await {
+            match task_result {
+                Ok(review) => {
+                    if let Some(r) = review {
+                        res.push(Some(r));
+                    } else {
+                        res.push(None);
+                    }
+                },
+                Err(e) => {
+                    error!("Task failed: {:#?}", e);
+                    res.push(None);
+                }
+            }
+        }
+        Some(res)
+    }
+
+    pub async fn backtrace_review_from(&mut self, id: usize) -> Result<bool, Box<dyn std::error::Error>> {
+        // Obtain proof path ids in decreasing order
+        let proof_path_ids = self.memory.get_proof_path_ids(id, true);
+        info!("Start reviewing the proof path: {:?}", &proof_path_ids);
+        let reviews = self.review_mems(&proof_path_ids).await.unwrap_or_default();
+        info!("Obtained {} reviews in the proof path", reviews.len());
+        // The correctness of this proofpath, default to true and changed to false once a flaw is
+        // found in the proof path.
+        let mut path_correctness = true;
+        // iterate through proof path in the derivation order
+        for (i, rev) in proof_path_ids.iter().zip(reviews.iter()) {
+            let mem = &mut self.memory.memory[*i];
+            if mem.memtype == "context" {
+                continue;
+            } // eliminate the given context
+            mem.set_reviews((mem.get_reviews() + self.config.reviews).min(MAX_REVIEWS_PER_NODE));
+            if let Some(r) = rev {
+                // Found a flaw in one memblock
+                path_correctness = false;
+                mem.set_comment(r);
+                mem.set_reviews(0);
+            }
+            mem.set_solved(path_correctness);
+            debug!("Modified memblock: {:#?}", &mem);
+        }
+        Ok(path_correctness)
+    }
+
+    pub async fn backtrace_refine_from(&mut self, id: usize) -> Result<(), Box<dyn std::error::Error>> {
+        let proof_path_ids = self.memory.get_proof_path_ids(id, true);
+        info!("Start refining the proof path: {:?}", &proof_path_ids);
+        let mut tasks: JoinSet<(usize, String)> = JoinSet::new();
+        for i in proof_path_ids {
+            let memblock = &self.memory.memory[i];
+            if memblock.is_solved() {
+                continue;
+            }
+            let review = memblock.get_comment();
+            if review.is_empty() {
+                continue;
+            }
+            let mut refiner = Refiner::new().model(&self.config.proof_model).streaming(false);
+            if let Some(context) = self.memory.format_deps(i, false, false) {
+                refiner.set_context(context);
+            }
+            refiner.set_conjecture(&memblock.content);
+            refiner.set_proof(&memblock.proof);
+            refiner.set_review(review);
+            tasks.spawn(async move {
+                // refiner will return a empty string on error
+                (i, refiner._process().await.unwrap_or_default())
+            });
+        }
+        while let Some(res) = tasks.join_next().await {
+            if let Ok((memid, reproof)) = res {
+                let memblock = &mut self.memory.memory[memid];
+                info!("One refinement complete for conjecture: {}.", memblock.content);
+                if !reproof.is_empty() {
+                    memblock.set_comment(String::new());
+                    if let Some(judgement) = find_box(&reproof) {
+                        if judgement == "false" {
+                            if let Some(n_conj) = extract_component(&reproof, "conjecture") {
+                                memblock.content = n_conj;
+                            }
+                        }
+                        if let Some(n_proof) = extract_component(&reproof, "proof") {
+                            memblock.proof = n_proof;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn update_memory(&mut self, nmemory: MemoryBlock) {
         if let Ok(mem_str) = serde_json::to_string_pretty(&nmemory) {
             info!("Session Memory Updated with: {}", mem_str);
         }
         self.memory.update(nmemory);
-        if let Some(context) = self.memory.format_all() {
+        if let Some(context) = self.memory.format_all(true) {
             self.explorer.set_context(&context);
             self.reviewer.set_context(&context);
             self.refiner.set_context(&context);
         }
+    }
+
+    fn update_memory_graph(&mut self, nmemory: MemoryBlock) {
+        if let Ok(mem_str) = serde_json::to_string_pretty(&nmemory) {
+            info!("Session Memory Graph Updated with: {}", mem_str);
+        }
+        self.memory.update(nmemory);
     }
 
     async fn save_memory(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -201,16 +360,77 @@ impl ResearchSession {
     }
 
     async fn format_to_markdown(&mut self) -> std::io::Result<()> {
-        let _ = self.format_memory_to_markdown().await;
+        if self.config.reformat {
+            let _ = self.format_memory_to_markdown().await;
+        }
         let md_path = self.config.logdir.as_path().join("all_memory.md");
-        if let Some(memory_content) = self.memory.format_all_with_proof() {
+        let pp_path = self.config.logdir.as_path().join("proof_path.md");
+        if let Some(memory_content) = self.memory.format_all_with_proof(false) {
             info!("Saving memory contents to path: {:#?}", md_path);
             let contents = format!("# Explore Trajectory of AIM\n\n{}", memory_content);
-            fs::write(md_path, contents)
-        } else {
-            debug!("No memory content was saved");
-            Ok(())
+            fs::write(md_path, contents)?;
         }
+        if let Some(proof_path_content) = self.memory.format_deps(self.memory.memory.len() - 1, true, true) {
+            info!("Saving proof paths to path: {:#?}", pp_path);
+            let contents = format!("# Complete Proof Path of AIM\n\n{}", proof_path_content);
+            fs::write(pp_path, contents)?;
+        }
+        Ok(())
+    }
+
+    pub async fn graph_step(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
+        if let Some(context) = self.memory.format_all(true) {
+            self.explorer.set_context(&context);
+        }
+        let raw_exploration = self.explorer._process().await?;
+        let conj = extract_component(&raw_exploration, "conjecture").unwrap_or_default();
+        let proof = extract_component(&raw_exploration, "proof").unwrap_or_default();
+        let final_proof = extract_component(&raw_exploration, "final_proof").unwrap_or_default();
+        let deps = extract_component(&raw_exploration, "dependency").unwrap_or_default();
+        if (conj.is_empty() || proof.is_empty() || deps.is_empty()) && (final_proof.is_empty() || deps.is_empty()) {
+            error!("Incomplete response format: conjecture {}; proof {}; dependency {}; final_proof: {};",
+                !conj.is_empty(), !proof.is_empty(), !deps.is_empty(), !final_proof.is_empty());
+            return Ok(false);
+        }
+        if final_proof.is_empty() {
+            info!("Collected one new conjecture: {}", &conj);
+            self.update_memory_graph(MemoryBlock::new()
+                .memtype("lemma")
+                .content(&conj)
+                .proof(&proof)
+                .deps(serde_json::from_str::<Vec<usize>>(&deps).unwrap_or_default())
+                .solved(false)
+                .reviews(0)
+            );
+        } else {
+            info!("Collected the final proof of this problem.");
+            self.update_memory_graph(MemoryBlock::new()
+                .memtype("theorem")
+                .content(&self.config.problem)
+                .proof(&final_proof)
+                .deps(serde_json::from_str::<Vec<usize>>(&deps).unwrap_or_default())
+                .solved(false)
+                .reviews(0)
+            );
+        }
+        let memid = self.memory.memory.len() - 1;
+        for i in 0..self.config.iterations+1 {
+            info!("Starting the {}-th iteration", i);
+            if self.backtrace_review_from(memid).await? {
+                info!("backtrace review ended and the proof path is correct.");
+                break;
+            } else if i < self.config.iterations {
+                info!("Some flaws were found in this proof path");
+                self.backtrace_refine_from(memid).await?;
+            }
+        }
+
+        if self.memory.memory[memid].is_solved()
+        && self.memory.memory[memid].memtype == "theorem"
+        && self.memory.memory[memid].content == self.config.problem {
+            return Ok(true);
+        }
+        return Ok(false);
     }
 
     pub async fn step(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
@@ -220,6 +440,7 @@ impl ResearchSession {
 
         let mut conjectures = extract_all_component(&raw_exploration, "conjecture");
         let mut proofs = extract_all_component(&raw_exploration, "proof");
+        let mut depss = extract_all_component(&raw_exploration, "dependency");
 
         if conjectures.len() != proofs.len() {
             error!(
@@ -233,7 +454,7 @@ impl ResearchSession {
             info!("Successfully collected {} conjectures and proofs in exploration.", conjectures.len());
         }
 
-        for (conj, proof) in conjectures.iter_mut().zip(proofs.iter_mut()) {
+        for ((conj, proof), deps) in conjectures.iter_mut().zip(proofs.iter_mut()).zip(depss.iter_mut()) {
             info!("Start verifying a conjecture");
             for i in 0..self.config.iterations {
                 self.reviewer.set_conjecture(&*conj);
@@ -269,6 +490,7 @@ impl ResearchSession {
                         .memtype("lemma")
                         .content(&*conj)
                         .proof(&*proof)
+                        .deps(serde_json::from_str::<Vec<usize>>(deps).unwrap_or_default())
                         .solved(true)
                         .reviews(self.config.reviews)
                     );
@@ -299,6 +521,7 @@ impl ResearchSession {
                         .memtype("theorem")
                         .content(&self.config.problem)
                         .proof(&final_proof)
+                        .deps(serde_json::from_str::<Vec<usize>>(&depss[depss.len()-1]).unwrap_or_default())
                         .solved(true)
                         .reviews(self.config.reviews)
                     );
@@ -352,13 +575,83 @@ impl Session for ResearchSession {
         for i in 0..self.config.steps {
             info!("Starting Exploration Step: {}", i);
             self.config.set_current_steps(i);
-            let solved = self.step().await?;
+            let solved = if self.config.theorem_graph_mode {
+                self.graph_step().await?
+            } else {
+                self.step().await?
+            };
             self.save_memory().await?;
             pb.inc(1);
             if solved {break;}
         }
         self.format_to_markdown().await?;
 
+        Ok(())
+    }
+    /// Run session remotely: same workflow as `run`, but persist results in SQLite
+    async fn remote_run(
+        &mut self,
+        db: &DatabaseConnection,
+        user_id: i32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Set up problem and initial context/memory
+        self.explorer.set_problem(self.config.problem.clone());
+        // Prepare timestamp and initial record
+        let ts = Utc::now().to_rfc3339().replace("'", "''");
+        let cfg_json = serde_json::to_string(&self.config)?;
+        let init_mem = serde_json::to_string(&self.memory)?;
+        let ctx = self.memory.memory.iter()
+            .find(|m| m.memtype == "context")
+            .map(|m| m.content.clone()).unwrap_or_default();
+        let title = self.config.title.replace("'", "''");
+        // initial lemma count from memory blocks
+        let init_lemmas = self.memory.memory.iter().filter(|m| m.memtype == "lemma").count() as i32;
+        let insert_sql = format!(
+            "INSERT INTO projects (user_id, title, problem, context, config, memory, created_at, last_active, lemmas_count, status) VALUES ({}, '{}', '{}', '{}', '{}', '{}', '{}', '{}', {}, 'running')",
+            user_id,
+            title,
+            self.config.problem.replace("'", "''"),
+            ctx.replace("'", "''"),
+            cfg_json.replace("'", "''"),
+            init_mem.replace("'", "''"),
+            ts,
+            ts,
+            init_lemmas,
+        );
+        db.execute(Statement::from_string(DbBackend::Sqlite, insert_sql)).await?;
+        // Exploration loop: update memory after each step
+        let mut solved_flag = false;
+        for _ in 0..self.config.steps {
+            let done = if self.config.theorem_graph_mode {
+                self.graph_step().await?
+            } else {
+                self.step().await?
+            };
+            // update memory, last_active and lemma count
+            let mem_json = serde_json::to_string(&self.memory.memory)?;
+            let now = Utc::now().to_rfc3339().replace("'", "''");
+            let lemmas = self.memory.memory.iter().filter(|m| m.memtype == "lemma").count() as i32;
+            let upd_sql = format!(
+                "UPDATE projects SET memory='{}', last_active='{}', lemmas_count={} WHERE user_id={} AND created_at='{}'",
+                mem_json.replace("'", "''"),
+                now,
+                lemmas,
+                user_id,
+                ts,
+            );
+        db.execute(Statement::from_string(DbBackend::Sqlite, upd_sql)).await?;
+            if done {
+                solved_flag = true;
+                break;
+            }
+        }
+        // After exploration loop, update final status: solved if a theorem was found, else ended
+        let status = if solved_flag { "solved" } else { "ended" };
+        let status_sql = format!(
+            "UPDATE projects SET status='{}' WHERE user_id={} AND created_at='{}'",
+            status, user_id, ts
+        );
+        db.execute(Statement::from_string(DbBackend::Sqlite, status_sql)).await?;
         Ok(())
     }
 }

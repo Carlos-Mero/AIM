@@ -1,0 +1,28 @@
+
+> frontend@0.1.0 build
+> next build
+
+   ▲ Next.js 15.3.4
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully in 0ms
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/10) ...
+   Generating static pages (2/10) 
+   Generating static pages (4/10) 
+   Generating static pages (7/10) 
+ ⨯ useSearchParams() should be wrapped in a suspense boundary at page "/project". Read more: https://nextjs.org/docs/messages/missing-suspense-with-csr-bailout
+    at a (/Users/huangyanxing/Desktop/docs/Research/AIM/frontend/.next/server/chunks/117.js:5:42255)
+    at f (/Users/huangyanxing/Desktop/docs/Research/AIM/frontend/.next/server/chunks/117.js:3:19821)
+    at g (/Users/huangyanxing/Desktop/docs/Research/AIM/frontend/.next/server/app/project/page.js:1:282131)
+    at nF (/Users/huangyanxing/Desktop/docs/Research/AIM/frontend/node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js:76:46843)
+    at nH (/Users/huangyanxing/Desktop/docs/Research/AIM/frontend/node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js:76:48618)
+    at nW (/Users/huangyanxing/Desktop/docs/Research/AIM/frontend/node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js:76:67762)
+    at nz (/Users/huangyanxing/Desktop/docs/Research/AIM/frontend/node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js:76:65337)
+    at nB (/Users/huangyanxing/Desktop/docs/Research/AIM/frontend/node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js:76:47195)
+    at nH (/Users/huangyanxing/Desktop/docs/Research/AIM/frontend/node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js:76:48664)
+    at nH (/Users/huangyanxing/Desktop/docs/Research/AIM/frontend/node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js:76:64688)
+Error occurred prerendering page "/project". Read more: https://nextjs.org/docs/messages/prerender-error
+Export encountered an error on /project/page: /project, exiting the build.
+ ⨯ Next.js build worker exited with code: 1 and signal: null

@@ -17,36 +17,104 @@ const API_RETRY_DELAY: Duration = Duration::from_secs(2);
 const MAX_REQWEST_RETRIES: u8 = 7;
 const MAX_CHUNK_DECODE_RETRIES: u8 = 16;
 
-#[derive(Default, Debug, Serialize, Deserialize)]
+use chrono::{DateTime, Utc};
+
+/// Provide default timestamp when deserializing older memory entries
+fn default_datetime() -> DateTime<Utc> {
+    Utc::now()
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MemoryBlock {
     pub memtype: String,
     pub content: String,
     pub proof: String,
-
-    // Used in memory graph, Working in process
+    /// Timestamp when this memory block was created
+    #[serde(default = "default_datetime")]
+    pub created_at: DateTime<Utc>,
+    /// Timestamp when this memory block was last modified
+    #[serde(default = "default_datetime")]
+    pub updated_at: DateTime<Utc>,
+    // Used in memory graph, working in process
     solved: bool,
     reviews: u8,
     comment: String,
-    deps: Vec<usize>
+    deps: Vec<usize>,
 }
 
 impl MemoryBlock {
+    /// Create a new MemoryBlock with timestamps set to now
     pub fn new() -> Self {
-        Self::default()
+        let now = Utc::now();
+        MemoryBlock {
+            memtype: String::new(),
+            content: String::new(),
+            proof: String::new(),
+            created_at: now,
+            updated_at: now,
+            solved: false,
+            reviews: 0,
+            comment: String::new(),
+            deps: Vec::new(),
+        }
     }
-    pub fn memtype(mut self, memtype: impl Into<String>) -> Self {self.memtype = memtype.into(); self}
-    pub fn content(mut self, content: impl Into<String>) -> Self {self.content = content.into(); self}
-    pub fn proof(mut self, proof: impl Into<String>) -> Self {self.proof = proof.into(); self}
-    pub fn solved(mut self, solved: bool) -> Self {self.solved = solved; self}
-    pub fn reviews(mut self, reviews: u8) -> Self {self.reviews = reviews; self}
-    pub fn comment(mut self, comment: impl Into<String>) -> Self {self.comment = comment.into(); self}
-    pub fn deps(mut self, deps: Vec<usize>) -> Self {self.deps = deps; self}
+    pub fn memtype(mut self, memtype: impl Into<String>) -> Self {
+        self.memtype = memtype.into();
+        self.updated_at = Utc::now();
+        self
+    }
+    pub fn content(mut self, content: impl Into<String>) -> Self {
+        self.content = content.into();
+        self.updated_at = Utc::now();
+        self
+    }
+    pub fn proof(mut self, proof: impl Into<String>) -> Self {
+        self.proof = proof.into();
+        self.updated_at = Utc::now();
+        self
+    }
+    pub fn solved(mut self, solved: bool) -> Self {
+        self.solved = solved;
+        self.updated_at = Utc::now();
+        self
+    }
+    pub fn reviews(mut self, reviews: u8) -> Self {
+        self.reviews = reviews;
+        self.updated_at = Utc::now();
+        self
+    }
+    pub fn deps(mut self, deps: Vec<usize>) -> Self {
+        self.deps = deps;
+        self.updated_at = Utc::now();
+        self
+    }
+    pub fn is_solved(&self) -> bool {self.solved}
+    pub fn set_solved(&mut self, solved: bool) -> &Self {
+        self.solved = solved;
+        self.updated_at = Utc::now();
+        self
+    }
+    pub fn get_reviews(&self) -> u8 {self.reviews}
+    pub fn set_reviews(&mut self, reviews: u8) -> &Self {
+        self.reviews = reviews;
+        self.updated_at = Utc::now();
+        self
+    }
+    pub fn get_comment(&self) -> &str {&self.comment}
+    pub fn set_comment(&mut self, comment: impl Into<String>) -> &Self {
+        self.comment = comment.into();
+        self.updated_at = Utc::now();
+        self
+    }
 
     pub fn _format(&self) -> String {
-        format!("\\begin{{{0}}}\n**content**: {1}\n\\end{{{0}}}", &self.memtype, &self.content)
+        format!("\\begin{{{0}}}\n{1}\n\n**DEPENDENCY**: {2:?}\n\\end{{{0}}}", &self.memtype, &self.content, &self.deps)
     }
     pub fn _format_with_proof(&self) -> String {
-        format!("\\begin{{{0}}}\n\n**content**: {1}\n**proof**: {2}\n\\end{{{0}}}", &self.memtype, &self.content, &self.proof)
+        let proof_content = if self.proof.is_empty() {String::new()} else {
+            format!("\n\\begin{{proof}}\n{0}\n\\end{{proof}}", &self.proof)
+        };
+        format!("\\begin{{{0}}}\n{1}\n\n**DEPENDENCY**: {2:?}\n\\end{{{0}}}{3}", &self.memtype, &self.content, &self.deps, &proof_content)
     }
 }
 
@@ -62,7 +130,73 @@ impl Memory {
     pub fn update(&mut self, nmemory: MemoryBlock) {
         self.memory.push(nmemory);
     }
-    pub fn format_all(&self) -> Option<String> {
+    pub fn get_proof_path_ids(&self, id: usize, include_end_node: bool) -> Vec<usize> {
+        // Format the given memory ID and all dependencies of it
+        // ids are sorted in the increasing order
+        let mut dep_ids: Vec<usize> = vec![id];
+        let mut retrieve_id: usize = 0;
+
+        while let Some(memblock) = &self.memory.get(dep_ids[retrieve_id]) {
+            for id in &memblock.deps {
+                if !dep_ids.contains(id) {
+                    dep_ids.push(*id);
+                }
+            }
+
+            retrieve_id += 1;
+            if retrieve_id >= dep_ids.len() {break;}
+        }
+        if !include_end_node {
+            dep_ids.remove(0);
+        }
+
+        // add the context information in memory id: 0 if exists
+        if let Some(memblock) = &self.memory.get(0) {
+            if !dep_ids.contains(&0) && memblock.memtype == "context" {
+                dep_ids.push(0);
+            }
+        }
+
+        dep_ids.sort_unstable();
+        return dep_ids;
+    }
+
+//    pub fn get_subgraph_ids(&self, id: usize) -> Vec<usize> {
+//        // Get all the memory ids derived from the given id
+//        let mut dev_ids: Vec<usize> = vec![id];
+//        for i in id+1 .. self.memory.len() {
+//            let memblock = &self.memory[i];
+//            for dep_id in &memblock.deps {
+//                if dev_ids.contains(dep_id) && !dev_ids.contains(&i) {
+//                    dev_ids.push(i);
+//                    break;
+//                }
+//            }
+//        }
+//        return dev_ids;
+//    }
+
+    pub fn format_deps(&self, id: usize, with_proof: bool, include_end_node: bool) -> Option<String> {
+        let mut dep_ids = self.get_proof_path_ids(id, include_end_node);
+        let mut res = String::new();
+        // add the context information in memory id: 0 if exists
+        if let Some(memblock) = &self.memory.get(0) {
+            if !dep_ids.contains(&0) && memblock.memtype == "context" {
+                dep_ids.push(0);
+            }
+        }
+
+        for id in dep_ids.iter().rev() {
+            if let Some(memblock) = &self.memory.get(*id) {
+                res.push_str(&format!("#### Memory **ID: {}**\n\n{}\n\n",
+                    id,
+                    if with_proof {memblock._format_with_proof()} else {memblock._format()}));
+            }
+        }
+
+        if res.is_empty() {None} else {Some(res)}
+    }
+    pub fn format_all(&self, solved_only: bool) -> Option<String> {
         // Format all memory blocks as the input of other agents
         if self.memory.is_empty() {
             None
@@ -71,12 +205,13 @@ impl Memory {
                 self.memory
                     .iter()
                     .enumerate()
+                    .filter(|(_, mem)| if solved_only {mem.is_solved()} else {true})
                     .map(|(i, mem)| format!("#### Memory **ID: {i}**\n\n{}\n\n", mem._format()))
                     .collect::<String>(),
             )
         }
     }
-    pub fn format_all_with_proof(&self) -> Option<String> {
+    pub fn format_all_with_proof(&self, solved_only: bool) -> Option<String> {
         // Format all memory blocks with proofs as the final output
         if self.memory.is_empty() {
             None
@@ -85,6 +220,7 @@ impl Memory {
                 self.memory
                     .iter()
                     .enumerate()
+                    .filter(|(_, mem)| if solved_only {mem.is_solved()} else {true})
                     .map(|(i, mem)| format!("#### Memory **ID: {i}**\n\n{}\n\n", mem._format_with_proof()))
                     .collect::<String>(),
             )
@@ -132,10 +268,10 @@ impl LMClient {
                 "content": prompt
             }
         ],
-            "temperature": 0.6,
+            "temperature": 1.0,
             "stream": true
         });
-        let url = format!("{}/v1/chat/completions", &self.base_url.trim_end_matches('/'));
+        let url = format!("{}/v1/chat/completions", &self.base_url.trim_end_matches('/').trim_end_matches("/v1"));
 
         let mut attempt: u8 = 0;
 
@@ -253,27 +389,33 @@ impl Explorer {
 #[async_trait::async_trait]
 impl Agent for Explorer {
     async fn _process(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let problem_stat = format!("<problem>{}</problem>", &self.problem);
+        let problem_stat = format!("\\begin{{problem}}{}\\end{{problem}}", &self.problem);
         let mut context_prefix = String::new();
         if let Some(context) = &self.context {
             context_prefix = format!("\n\nHere is a list of context that we have collected for this problem or our history findings during exploration. They can be accepted without controversy as correct, and you can begin your exploration based on them.\n\n### Context and History Explorations\n\n{}", context);
         }
         let prompt = concat!("### Instruction\n",
-             "\n",
-             "You are an expert that is knowledgeable across all domains in math. This time you are asked to help with our frontier math research. Its statement is as follows:\n",
-             "\n").to_string() + 
-             &problem_stat + 
-             concat!("\n",
-             "This problem could be difficult and not able to be directly solved, but you can make your contribution with the following instructions:\n",
-             "\n",
-             "1. You are required to explore different approaches or directions that might help with our final goal and write down one or more interesting findings in your explorations as conjectures in your response. DO NOT claim that you can not do this jod.\n",
-             "2. Your conjecture must contain the complete definitions required within it, such that it is able to stand alone as an independent lemma. Do not propose any existing lemmas as your new conjectures. You can directly use them in your explorations.\n",
-             "3. You should wrap your findings inside a latex environment, as \\begin{conjecture}Your new findings here\\end{conjecture}. Each conjecture should be equiped with a detailed, complete and rigorous proof. You should explicitly write down every intermediate derivation steps in the proof. The corresponding proof should be wrapped in \\begin{proof}Your proof of the conjecture above\\end{proof} directly followed by each conjecture. The quantities of conjectures and proofs must match exactly.\n",
-             "\n",
-             "Your conjectures will then be verified and collected as the basis for future explorations.",
-             "Moreover, when you think the time is right that you are able to prove the original problem, you can simply state your proof inside \\begin{final_proof}\\end{final_proof}."
-             )
-             + &context_prefix;
+            "\n",
+            "You are an expert that is knowledgeable across all domains in math. This time you are asked to help with our frontier math research. Its statement is as follows:\n",
+            "\n").to_string() + 
+        &problem_stat + 
+        concat!("\n",
+            "This problem could be difficult and not able to be directly solved, but you can make your contribution with the following instructions:\n",
+            "\n",
+            "1. You are required to explore different approaches or directions that might help with our final goal, and write down one interesting finding in your explorations as a new conjecture in your response. DO NOT claim that you can not do this job.\n",
+            "2. Your conjecture must contain the complete definitions required within it, such that it is able to stand alone as an independent lemma, unless it is declared in memory. It should be a novel conjecture that marks concrete achievements and is not similar to any existing lemmas.\n",
+            "3. You should wrap your finding inside a latex environment: \\begin{conjecture}\\end{conjecture}. This conjecture should be equipped with a detailed, complete and rigorous proof. You should explicitly write down every intermediate derivation step in the proof. The corresponding proof should be wrapped in \\begin{proof}\\end{proof} directly followed by the conjecture.\n",
+            "4. After these components you should also provide the dependency of this conjecture. You need to write down the memory IDs of lemmas used in this conjecture in a JSON array format, and warp them inside \\begin{dependency}\\end{dependency}. For example, a dependency of a new conjecture could be \\begin{dependency}[0, 3, 4]\\end{dependency}. You can use an empty array \"[]\" when this conjecture does not depend on other lemmas.\n",
+            "\n",
+            "More accurately, your response should obey the following format:\n",
+            "\n",
+            "\\begin{conjecture}Your new findings here\\end{conjecture}\n",
+            "\\begin{proof}Your proof of the conjecture above\\end{proof}\n",
+            "\\begin{dependency}An json array of related memory IDs of this conjecture\\end{dependency}",
+            "\n",
+            "Moreover, when you think the time is right that you are able to prove the original problem, you can simply state your proof inside \\begin{final_proof}\\end{final_proof}, and explicitly write down its dependency in \\begin{dependency}\\end{dependency}. In this case, you do not need to propose any new conjectures for this problem."
+        )
+        + &context_prefix;
 
         return self.client.comp(&prompt, &self.model, self.streaming).await;
     }
@@ -330,7 +472,9 @@ impl Reviewer {
 
         while let Ok(review) = tasks.join_next().await? {
             if let Some(r) = review {
+                debug!("Collected one review: {}", &r);
                 if find_box(&r)? == "invalid" {
+                    info!("One reviewer found a flaw in the proof: {}", &r);
                     tasks.shutdown().await;
                     pb.finish();
                     return Some(r);

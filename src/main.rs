@@ -2,10 +2,12 @@ mod agents;
 mod aim;
 mod sessions;
 mod utils;
+mod server;
 use crate::aim::AIM;
 use crate::sessions::ResearchSessionConfig;
 
 use env_logger;
+use log::{error};
 
 use clap::Parser;
 
@@ -31,7 +33,7 @@ struct Cli {
     steps: u32,
 
     /// parallel reviews in pessimistic verification
-    #[arg(short = 'r', long = "reviews", default_value_t = 4)]
+    #[arg(short = 'r', long = "reviews", default_value_t = 3)]
     reviews: u8,
 
     /// Maximum refine iterations
@@ -42,19 +44,36 @@ struct Cli {
     #[arg(long = "resume", action = clap::ArgAction::SetTrue, default_value_t = false)]
     resume: bool,
 
+    /// Reformat conjectures and proofs after explorations
+    #[arg(long = "reformat", action = clap::ArgAction::SetTrue, default_value_t = false)]
+    reformat: bool,
+
     /// Disable streaming output in each session
     #[arg(long = "no_streaming", action = clap::ArgAction::SetFalse, default_value_t = true)]
     streaming: bool,
+
+    /// Disable theorem graph mode
+    #[arg(long = "no_tgm", action = clap::ArgAction::SetFalse, default_value_t = true)]
+    theorem_graph_mode: bool,
+
+    /// Running AIM as a server backend
+    #[arg(long = "server", action = clap::ArgAction::SetTrue, default_value_t = false)]
+    server: bool
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::Builder::from_env(env_logger::Env::default()
-        .default_filter_or("info"))
-        .target(env_logger::Target::Stdout)
-        .init();
-
     let cli = Cli::parse();
+    use log::LevelFilter;
+    // Initialize logger: default to 'info', but in --server mode silence agents & sessions to 'error'
+    let env = env_logger::Env::default().default_filter_or("info");
+    let mut builder = env_logger::Builder::from_env(env);
+    builder.target(env_logger::Target::Stdout);
+    if cli.server {
+        builder.filter_module("aim::agents", LevelFilter::Error);
+        builder.filter_module("aim::sessions", LevelFilter::Error);
+    }
+    builder.init();
 
     let mut aim = AIM::new();
     if let Some(p) = cli.problem.as_deref() {
@@ -66,10 +85,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .reviews(cli.reviews)
             .iterations(cli.iterations)
             .resume(cli.resume)
-            .streaming(cli.streaming);
+            .reformat(cli.reformat)
+            .streaming(cli.streaming)
+            .theorem_graph_mode(cli.theorem_graph_mode);
         let _ = aim.run_session(config).await;
+    } else if cli.server {
+        let _ = aim.runserver().await;
     } else {
-        let _ = aim.run_tui().await;
+        error!("Unknown running configs, existing.");
     }
 
     Ok(())
