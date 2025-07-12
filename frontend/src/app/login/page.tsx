@@ -24,8 +24,10 @@ const Login: React.FC = () => {
       });
       const data = await resp.json();
       if (resp.ok && data.success && data.token) {
-        login(data.token);
-        router.push('/');
+        // Perform login and wait for context to update
+        await login(data.token);
+        // Navigate directly to dashboard
+        router.replace('/home');
       } else {
         setError(data.message || '登录失败');
       }

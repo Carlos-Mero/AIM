@@ -70,7 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.warn('Failed to fetch user info after login', err);
     }
-    router.push('/');
+    // Navigation after login is handled by caller
   };
 
   const logout = () => {
