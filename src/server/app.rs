@@ -51,7 +51,7 @@ pub async fn run() -> std::io::Result<()> {
     db.execute(Statement::from_string(DbBackend::Sqlite, create_tbl.to_owned()))
         .await
         .expect("Failed to create users table");
-    // Ensure projects table exists (for listing projects); add status column for project state
+    // Ensure projects table exists (for listing projects); include status and comments
     let create_projects = r#"
         CREATE TABLE IF NOT EXISTS projects (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,13 +64,13 @@ pub async fn run() -> std::io::Result<()> {
             created_at TEXT NOT NULL,
             last_active TEXT NOT NULL,
             lemmas_count INTEGER NOT NULL,
-            status TEXT NOT NULL DEFAULT 'running'
+            status TEXT NOT NULL DEFAULT 'running',
+            comment TEXT NOT NULL DEFAULT ''
         );
     "#;
     db.execute(Statement::from_string(DbBackend::Sqlite, create_projects.to_owned()))
         .await
         .expect("Failed to create projects table");
-    // In case the table existed without status, try to add the column (ignore errors)
     HttpServer::new(move || {
     // CORS config
     let cors = Cors::default()
@@ -89,10 +89,12 @@ pub async fn run() -> std::io::Result<()> {
                     .route("/login", web::post().to(handle_login))
                     .route("/logout", web::post().to(handle_logout))
                     .route("/me", web::get().to(handle_me))
-                    // Create a new research project (starts a session)
-                    .route("/project", web::post().to(handle_new_project))
-                    .route("/project/{id}", web::get().to(handle_get_project))
-                    .route("/project/{id}", web::delete().to(handle_delete_project))
+    // Create & manage research projects
+    .route("/project", web::post().to(handle_new_project))
+    .route("/project/{id}", web::get().to(handle_get_project))
+    .route("/project/{id}", web::delete().to(handle_delete_project))
+    // Update project comment/notes
+    .route("/project/{id}/comment", web::post().to(handle_update_comment))
                     .route("/projects", web::get().to(handle_list_projects))
             )
             // Static assets for SPA (responds to GET/HEAD only)
@@ -510,8 +512,8 @@ async fn handle_list_projects(
     }
 }
 
-// GET /api/project/{id}
-/// Return full project details including memory blocks
+    // GET /api/project/{id}
+    /// Return full project details including memory blocks
 async fn handle_get_project(
     db: web::Data<DatabaseConnection>,
     req: HttpRequest,
@@ -534,14 +536,15 @@ async fn handle_get_project(
     let is_admin = std::env::var("AIM_ADMIN_EMAIL").map(|e| e == user_email).unwrap_or(false);
     let project_id = path.into_inner().0;
     // Build SQL to fetch project details, including creator name
+    // Fetch project detail including comment
     let sql = if is_admin {
         format!(
-            "SELECT p.id, p.title, p.problem, p.context, p.memory, p.config, p.created_at, p.last_active, p.lemmas_count, p.status, u.full_name AS creator FROM projects p JOIN users u ON p.user_id = u.id WHERE p.id={} LIMIT 1",
+            "SELECT p.id, p.title, p.problem, p.context, p.memory, p.config, p.created_at, p.last_active, p.lemmas_count, p.status, p.comment, u.full_name AS creator FROM projects p JOIN users u ON p.user_id = u.id WHERE p.id={} LIMIT 1",
             project_id
         )
     } else {
         format!(
-            "SELECT p.id, p.title, p.problem, p.context, p.memory, p.config, p.created_at, p.last_active, p.lemmas_count, p.status, u.full_name AS creator FROM projects p JOIN users u ON p.user_id = u.id WHERE p.id={} AND p.user_id={} LIMIT 1",
+            "SELECT p.id, p.title, p.problem, p.context, p.memory, p.config, p.created_at, p.last_active, p.lemmas_count, p.status, p.comment, u.full_name AS creator FROM projects p JOIN users u ON p.user_id = u.id WHERE p.id={} AND p.user_id={} LIMIT 1",
             project_id, user_id
         )
     };
@@ -559,6 +562,7 @@ async fn handle_get_project(
             let last_active: String = row.try_get("", "last_active").unwrap_or_default();
             let lemmas_count: i32 = row.try_get("", "lemmas_count").unwrap_or_default();
             let status: String = row.try_get("", "status").unwrap_or_else(|_| "running".to_string());
+            let comment: String = row.try_get("", "comment").unwrap_or_default();
             let creator: String = row.try_get("", "creator").unwrap_or_default();
             #[derive(Serialize)]
             struct ProjectDetail {
@@ -571,14 +575,63 @@ async fn handle_get_project(
                 last_active: String,
                 lemmas_count: i32,
                 status: String,
+                comment: String,
                 config: String,
                 creator: String,
             }
-            let detail = ProjectDetail { id, title, problem, context, memory, created_at, last_active, lemmas_count, status, config: config_json, creator };
+            let detail = ProjectDetail { id, title, problem, context, memory, created_at, last_active, lemmas_count, status, comment, config: config_json, creator };
             HttpResponse::Ok().json(detail)
         }
         Ok(None) => HttpResponse::NotFound().json(ApiResponse { success: false, message: "Project not found".into(), token: None }),
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse { success: false, message: format!("DB error: {}", e), token: None }),
+    }
+}
+
+/// Request payload for updating project comment/notes
+#[derive(Debug, Deserialize)]
+struct CommentRequest {
+    comment: String,
+}
+
+/// POST /api/project/{id}/comment
+/// Update or set the notes/comment for a project
+async fn handle_update_comment(
+    db: web::Data<DatabaseConnection>,
+    req: HttpRequest,
+    path: Path<(i32,)>,
+    payload: web::Json<CommentRequest>,
+) -> impl Responder {
+    // Authenticate via Bearer JWT
+    let auth_header = req.headers().get("Authorization").and_then(|v| v.to_str().ok()).unwrap_or("");
+    if !auth_header.starts_with("Bearer ") {
+        return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Missing or invalid Authorization header".into(), token: None });
+    }
+    let token = &auth_header[7..];
+    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "secret".into());
+    let claims = match decode::<Claims>(token, &DecodingKey::from_secret(secret.as_ref()), &Validation::new(Algorithm::HS256)) {
+        Ok(data) => data.claims,
+        Err(_) => return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Invalid token".into(), token: None }),
+    };
+    let user_id = claims.sub;
+    let project_id = path.into_inner().0;
+    // Only owner or admin can update
+    let user_email = claims.email;
+    let is_admin = std::env::var("AIM_ADMIN_EMAIL").map(|e| e == user_email).unwrap_or(false);
+    // Sanitize comment to escape single quotes
+    let comment = payload.comment.replace("'", "''");
+    // Build update SQL
+    let filter = if is_admin {
+        format!("id={} ", project_id)
+    } else {
+        format!("id={} AND user_id={} ", project_id, user_id)
+    };
+    let sql = format!(
+        "UPDATE projects SET comment='{}' WHERE {}",
+        comment, filter
+    );
+    match db.get_ref().execute(Statement::from_string(DbBackend::Sqlite, sql)).await {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse { success: true, message: "Comment saved".into(), token: None }),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse { success: false, message: format!("Failed to update comment: {}", e), token: None }),
     }
 }
 

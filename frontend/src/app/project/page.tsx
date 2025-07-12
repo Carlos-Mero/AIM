@@ -73,6 +73,8 @@ interface Project {
   config: string;
   // Project creator's full name
   creator: string;
+  // User-defined project notes/comments
+  comment: string;
 }
 
 // Type for project config serialized from backend (snake_case keys)
@@ -92,6 +94,10 @@ const ProjectDetailContent: React.FC = () => {
   const projectId = searchParams.get('projectId');
   const { token } = useAuth();
   const [project, setProject] = useState<Project | null>(null);
+  // Local notes/comments state
+  const [comment, setComment] = useState<string>('');
+  // Save status indicator: 'idle' | 'success' | 'error'
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
   // parsed config object from project.config
   const [configObj, setConfigObj] = useState<ProjectConfig | null>(null);
   const [showConfig, setShowConfig] = useState(false);
@@ -103,6 +109,8 @@ const ProjectDetailContent: React.FC = () => {
       } catch {
         setConfigObj(null);
       }
+      // initialize notes
+      setComment(project.comment ?? '');
     }
   }, [project]);
   const [selectedLemma, setSelectedLemma] = useState<Lemma | null>(null);
@@ -344,6 +352,50 @@ const ProjectDetailContent: React.FC = () => {
               </div>
             </div>
           </div>
+        {/* Project notes / comments */}
+        <div className="bg-white rounded-2xl shadow p-6 mt-6 mb-6 space-y-4">
+          <h2 className="text-lg font-semibold mb-2">Notes or Comments</h2>
+          <textarea
+            className="w-full border rounded p-2 h-32 resize-none"
+            value={comment}
+            onChange={e => setComment(e.target.value)}
+            placeholder="Add your notes here..."
+          />
+          <div className="mt-2 flex items-center justify-end space-x-4">
+            {/* Status message */}
+            {saveStatus === 'success' && (
+              <span className="text-green-600">Saved!</span>
+            )}
+            {saveStatus === 'error' && (
+              <span className="text-red-600">Failed to save</span>
+            )}
+            <button
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              onClick={async () => {
+                setSaveStatus('idle');
+                try {
+                  const resp = await fetch(`${API_BASE}/api/project/${projectId}/comment`, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      Authorization: `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ comment })
+                  });
+                  if (!resp.ok) throw new Error('Save failed');
+                  setSaveStatus('success');
+                  // auto-clear after a delay
+                  setTimeout(() => setSaveStatus('idle'), 3000);
+                } catch (err) {
+                  console.error(err);
+                  setSaveStatus('error');
+                }
+              }}
+            >
+              Save
+            </button>
+          </div>
+        </div>
         </main>
       </div>
   );
