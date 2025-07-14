@@ -58,7 +58,10 @@ struct Cli {
 
     /// Running AIM as a server backend
     #[arg(long = "server", action = clap::ArgAction::SetTrue, default_value_t = false)]
-    server: bool
+    server: bool,
+    /// Port to bind in server mode
+    #[arg(long = "port", default_value_t = 4000)]
+    port: u16
 }
 
 #[tokio::main]
@@ -90,7 +93,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .theorem_graph_mode(cli.theorem_graph_mode);
         let _ = aim.run_session(config).await;
     } else if cli.server {
-        let _ = aim.runserver().await;
+        // Bind to all interfaces on the given port
+        let bind_addr = format!("0.0.0.0:{}", cli.port);
+        log::info!("Starting server at {}", bind_addr);
+        aim.runserver(&bind_addr).await?;
     } else {
         error!("Unknown running configs, existing.");
     }

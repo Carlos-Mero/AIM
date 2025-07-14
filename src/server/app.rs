@@ -21,7 +21,8 @@ struct Claims {
     exp: usize,
 }
 
-pub async fn run() -> std::io::Result<()> {
+/// Run the AIM HTTP server, binding to the given address (e.g., "0.0.0.0:4000").
+pub async fn run(bind_addr: &str) -> std::io::Result<()> {
     // Determine database path (env DATABASE_PATH or default "aim.db")
     let db_path = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "aim.db".to_string());
     let db_path_buf = std::path::PathBuf::from(&db_path);
@@ -105,7 +106,8 @@ pub async fn run() -> std::io::Result<()> {
                     .index_file("index.html")
             )
     })
-    .bind(("127.0.0.1", 4000))?
+    // bind to provided address (e.g., "0.0.0.0:port")
+    .bind(bind_addr)?
     .run()
     .await
 }

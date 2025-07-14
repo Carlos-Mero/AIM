@@ -16,8 +16,9 @@ impl AIM {
         }
     }
 
-    pub async fn runserver(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        server::app::run().await?;
+    /// Run the HTTP server at the given bind address (e.g., "0.0.0.0:4000").
+    pub async fn runserver(&mut self, bind_addr: &str) -> Result<(), Box<dyn std::error::Error>> {
+        server::app::run(bind_addr).await?;
         Ok(())
     }
 
