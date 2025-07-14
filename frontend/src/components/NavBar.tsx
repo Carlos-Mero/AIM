@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { FaBook, FaCog, FaSignOutAlt, FaUser, FaQuestionCircle } from 'react-icons/fa';
+import SettingsModal from './SettingsModal';
 import HelpModal from './HelpModal';
 import { useRouter } from 'next/navigation';
 
@@ -10,6 +11,7 @@ export default function NavBar() {
   const router = useRouter();
   const { fullName, role, credits, logout } = useAuth();
   const [showHelp, setShowHelp] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const userName = fullName ?? '访客';
 
   const handleSignOut = async () => {
@@ -46,7 +48,7 @@ export default function NavBar() {
             </div>
             <button
               className="text-blue-200 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center"
-              onClick={() => {/* settings not implemented */}}
+              onClick={() => setShowSettings(true)}
             >
               <FaCog className="mr-1" />
               <span className="hidden md:block">设置</span>
@@ -67,6 +69,7 @@ export default function NavBar() {
             </button>
           </div>
           <HelpModal show={showHelp} onClose={() => setShowHelp(false)} />
+          <SettingsModal show={showSettings} onClose={() => setShowSettings(false)} />
         </div>
       </div>
     </nav>

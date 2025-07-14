@@ -89,6 +89,8 @@ pub async fn run() -> std::io::Result<()> {
                     .route("/login", web::post().to(handle_login))
                     .route("/logout", web::post().to(handle_logout))
                     .route("/me", web::get().to(handle_me))
+                   // Update invitation code for current user
+                    .route("/me/invitation", web::post().to(handle_update_invitation))
     // Create & manage research projects
     .route("/project", web::post().to(handle_new_project))
     .route("/project/{id}", web::get().to(handle_get_project))
@@ -147,6 +149,53 @@ struct MeResponse {
     role: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     credits: Option<String>,
+}
+
+/// Request to update invitation code for current user
+#[derive(Deserialize)]
+struct UpdateInvitationRequest {
+    invitation_code: String,
+}
+
+/// Handle updating invitation code for current user
+async fn handle_update_invitation(
+    db: web::Data<DatabaseConnection>,
+    req: HttpRequest,
+    form: web::Json<UpdateInvitationRequest>,
+) -> impl Responder {
+    // Authenticate via Bearer token
+    let auth_header = match req.headers().get("Authorization") {
+        Some(v) => v.to_str().unwrap_or(""),
+        None => return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Missing Authorization header".into(), token: None }),
+    };
+    if !auth_header.starts_with("Bearer ") {
+        return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Invalid Authorization header".into(), token: None });
+    }
+    let token = &auth_header[7..];
+    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "secret".into());
+    let token_data = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_ref()),
+        &Validation::new(Algorithm::HS256)
+    ) {
+        Ok(data) => data,
+        Err(_) => return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Invalid token".into(), token: None }),
+    };
+    let user_id = token_data.claims.sub;
+    // Load existing user
+    match User::find_by_id(user_id).one(db.get_ref()).await {
+        Ok(Some(user)) => {
+            // Perform update
+            let mut am = UserActiveModel::from(user);
+            am.invitation_code = Set(Some(form.invitation_code.clone()));
+            if let Err(e) = am.update(db.get_ref()).await {
+                return HttpResponse::InternalServerError().json(ApiResponse { success: false, message: format!("DB update error: {}", e), token: None });
+            }
+            HttpResponse::Ok().json(ApiResponse { success: true, message: "Invitation code updated".into(), token: None })
+        }
+        Ok(None) => HttpResponse::NotFound().json(ApiResponse { success: false, message: "User not found".into(), token: None }),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse { success: false, message: format!("DB error: {}", e), token: None }),
+    }
 }
 
 /// Handle user signup: insert new user via SeaORM
