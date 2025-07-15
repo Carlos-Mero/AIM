@@ -8,6 +8,7 @@ import NavBar from '@/components/NavBar';
 import { FaSearch, FaInfoCircle } from 'react-icons/fa';
 import LemmaList from '@/components/LemmaList';
 import LemmaDetail from '@/components/LemmaDetail';
+import CopyableBlock from '@/components/CopyableBlock';
 import Lemma from '@/interfaces/Lemma';
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
@@ -206,15 +207,19 @@ const ProjectDetailContent: React.FC = () => {
           <h1 className="text-2xl font-bold text-gray-800">{project.title}</h1>
           {/* Creator at top-right */}
           <div className="absolute top-4 right-6 text-sm text-gray-500">创建者：{project.creator}</div>
-          <div className="mt-2 text-gray-600 prose">
-            {renderDescription(project.problem)}
-          </div>
+          <CopyableBlock text={project.problem}>
+            <div className="mt-2 text-gray-600 prose">
+              {renderDescription(project.problem)}
+            </div>
+          </CopyableBlock>
           {project.context && (
             <div className="mt-4 p-4 bg-gray-50 border-l-4 border-blue-500">
-              <h3 className="font-semibold mb-2">Context</h3>
-              <div className="text-gray-700 prose">
-                {renderDescription(project.context)}
-              </div>
+              <CopyableBlock text={project.context}>
+                <h3 className="font-semibold mb-2">Context</h3>
+                <div className="text-gray-700 prose">
+                  {renderDescription(project.context)}
+                </div>
+              </CopyableBlock>
             </div>
           )}
           <div className="mt-3 flex items-center space-x-4">

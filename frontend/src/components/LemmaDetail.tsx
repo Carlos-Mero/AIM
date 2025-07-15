@@ -5,6 +5,7 @@ import Lemma from '@/interfaces/Lemma';
 import { BlockMath, InlineMath } from 'react-katex';
 import 'katex/dist/katex.min.css';
 import { FaCheck, FaHourglassHalf, FaTimes } from 'react-icons/fa';
+import CopyableBlock from './CopyableBlock';
 
 interface LemmaDetailProps {
   lemma: Lemma;
@@ -164,9 +165,10 @@ const LemmaDetail: React.FC<LemmaDetailProps> = ({ lemma }) => {
         </div>
 
         {/* 引理陈述 - 支持行内/块级公式，避免 <div> 嵌套在 <p> */}
-        <div className="bg-white rounded-lg text-gray-600 p-4 shadow-inner border border-gray-200 mt-4 prose">
-          <h3 className="text-lg font-semibold mb-3 text-blue-700">引理陈述:</h3>
-          {lemma.statement.split(/\n{2,}/).flatMap((para, pidx) => {
+        <CopyableBlock text={lemma.statement}>
+          <div className="bg-white rounded-lg text-gray-600 p-4 shadow-inner border border-gray-200 mt-4 prose">
+            <h3 className="text-lg font-semibold mb-3 text-blue-700">引理陈述:</h3>
+            {lemma.statement.split(/\n{2,}/).flatMap((para, pidx) => {
             // 支持 $$..$$, \[..\], \(..\) 块/行内和 $..$ 行内公式
             const tokens = para.split(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$[^$\n]+\$)/g).filter(Boolean);
             let buffer: React.ReactNode[] = [];
@@ -205,24 +207,29 @@ const LemmaDetail: React.FC<LemmaDetailProps> = ({ lemma }) => {
             flush();
             return elems;
           })}
-        </div>
+          </div>
+        </CopyableBlock>
       </div>
       
       {/* 引理证明内容：展示完整证明，无滚动 */}
-      <div className="p-6">
-        <h3 className="text-xl font-bold mb-4 text-blue-800">证明:</h3>
-        <div className="prose max-w-none text-gray-700">
-          {renderProofContent()}
-        </div>
-      </div>
-      {/* 评论内容（如果有） */}
-      {lemma.comment && (
-        <div className="p-4 bg-yellow-50 border-t border-yellow-200 text-sm text-gray-800">
-          <h4 className="font-semibold mb-2 text-yellow-800">评审评论:</h4>
-          <div className="prose max-w-none">
-            {renderCommentContent()}
+      <CopyableBlock text={lemma.proof}>
+        <div className="p-6">
+          <h3 className="text-xl font-bold mb-4 text-blue-800">证明:</h3>
+          <div className="prose max-w-none text-gray-700">
+            {renderProofContent()}
           </div>
         </div>
+      </CopyableBlock>
+      {/* 评论内容（如果有） */}
+      {lemma.comment && (
+        <CopyableBlock text={lemma.comment}>
+          <div className="p-4 bg-yellow-50 border-t border-yellow-200 text-sm text-gray-800">
+            <h4 className="font-semibold mb-2 text-yellow-800">评审评论:</h4>
+            <div className="prose max-w-none">
+              {renderCommentContent()}
+            </div>
+          </div>
+        </CopyableBlock>
       )}
       {/* 底部元数据 */}
       <div className="pt-4 pw-4 border-t border-gray-200 text-sm text-gray-500 flex justify-between">
