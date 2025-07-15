@@ -50,7 +50,7 @@ const HelpModal: React.FC<HelpModalProps> = ({ show, onClose }) => {
           </p>
           <h3 className="font-semibold">Credits 系统</h3>
           <p>
-            系统通过积分 (Credits) 限制每日/总项目创建数量。您可在导航栏查看剩余积分及角色信息。其中NORMAL用户总共仅2次使用额度，拥有邀请码的INVITED用户每日可创建至多3个项目 (富余额度不累积到第二天)。积分限制主要是出于运营成本考量而设置，目前我们还没有额外补充使用额度的途径，敬请谅解。
+            系统通过积分 (Credits) 限制每日/总项目创建数量。您可在导航栏查看剩余积分及角色信息。其中NORMAL用户总共仅2次使用额度，拥有邀请码的INVITED用户每日可创建至多7个项目 (额度不累积到第二天)。积分限制主要是出于运营成本考量而设置，目前我们还没有额外补充使用额度的途径，敬请谅解。
           </p>
           <h3 className="font-semibold">更多帮助</h3>
           <p>

@@ -322,7 +322,7 @@ async fn handle_me(
             let credits = if is_admin {
                 "unlimited".to_string()
             } else if is_invited {
-                // invited: max 3 per day
+                // invited: max 7 per day
                 let sql = format!(
                     "SELECT COUNT(*) AS cnt FROM projects WHERE user_id={} AND date(created_at)=date('now')", user_id);
                 let used: i64 = db.get_ref()
@@ -332,8 +332,8 @@ async fn handle_me(
                     .and_then(|row_opt| row_opt)
                     .and_then(|row| row.try_get::<i64>("", "cnt").ok())
                     .unwrap_or(0);
-                let remaining = (3 - used).max(0);
-                format!("{}/3", remaining)
+                let remaining = (7 - used).max(0);
+                format!("{}/7", remaining)
             } else {
                 // normal: max 2 total
                 let sql = format!("SELECT COUNT(*) AS cnt FROM projects WHERE user_id={} ", user_id);
@@ -413,14 +413,14 @@ async fn handle_new_project(
     };
     // check counts
     let mut limit_exceeded = false;
-    if !is_admin {
+        if !is_admin {
         if is_invited {
-            // invited: max 3 projects per day
+            // invited: max 7 projects per day
             let sql = format!(
                 "SELECT COUNT(*) AS cnt FROM projects WHERE user_id={} AND date(created_at)=date('now')", user_id);
             if let Ok(Some(row)) = db.get_ref().query_one(Statement::from_string(DbBackend::Sqlite, sql)).await {
                 if let Ok(cnt) = row.try_get::<i64>("", "cnt") {
-                    limit_exceeded = cnt >= 3;
+                    limit_exceeded = cnt >= 7;
                 }
             }
         } else {
