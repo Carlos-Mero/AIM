@@ -1,7 +1,6 @@
 import React, { Dispatch, SetStateAction } from 'react';
 import Lemma from '@/interfaces/Lemma';
 import { FaCircle } from 'react-icons/fa';
-import CopyableBlock from './CopyableBlock';
 
 interface LemmaListProps {
   lemmas: Lemma[];
@@ -66,11 +65,9 @@ const LemmaList: React.FC<LemmaListProps> = ({
               </div>
             </div>
             
-            <CopyableBlock text={lemma.statement}>
-              <p className="text-sm text-gray-600 line-clamp-2 mb-3">
-                {lemma.statement}
-              </p>
-            </CopyableBlock>
+            <p className="text-sm text-gray-600 line-clamp-2 mb-3">
+              {lemma.statement}
+            </p>
             
             <div className="flex justify-between items-center">
               <span
