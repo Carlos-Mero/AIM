@@ -12,6 +12,13 @@ use crate::sessions::{ResearchSession, ResearchSessionConfig, Session};
 use log::{info, error};
 use serde::Deserialize;
 use dotenvy::dotenv;
+/// Check if the given email is listed in the AIM_ADMIN_EMAIL env var (comma-separated)
+fn is_admin_email(user_email: &str) -> bool {
+    match std::env::var("AIM_ADMIN_EMAIL") {
+        Ok(list) => list.split(',').map(str::trim).any(|e| e == user_email),
+        Err(_) => false,
+    }
+}
 
 /// JWT claims
 #[derive(Debug, Serialize, Deserialize)]
@@ -306,7 +313,7 @@ async fn handle_me(
                 panic!();
             }
             // determine role
-            let is_admin = std::env::var("AIM_ADMIN_EMAIL").map(|e| e == user.email).unwrap_or(false);
+            let is_admin = is_admin_email(&user.email);
             let is_invited = match std::env::var("AIM_INV_CODE") {
                 Ok(inv) => user.invitation_code.as_deref() == Some(inv.as_str()),
                 Err(_) => false,
@@ -404,8 +411,8 @@ async fn handle_new_project(
         panic!();
     }
     // determine role by environment variables
-    // admin if user email matches AIM_ADMIN_EMAIL
-    let is_admin = std::env::var("AIM_ADMIN_EMAIL").map(|e| e == user.email).unwrap_or(false);
+    // admin if user email is listed in AIM_ADMIN_EMAIL
+    let is_admin = is_admin_email(&user.email);
     // invited if user.invitation_code equals AIM_INV_CODE
     let is_invited = match std::env::var("AIM_INV_CODE") {
         Ok(inv) => user.invitation_code.as_deref() == Some(inv.as_str()),
@@ -522,7 +529,7 @@ async fn handle_list_projects(
     let user_id = claims.sub;
     let user_email = claims.email.clone();
     // determine if admin (bypass project filters)
-    let is_admin = std::env::var("AIM_ADMIN_EMAIL").map(|e| e == user_email).unwrap_or(false);
+    let is_admin = is_admin_email(&user_email);
     // apply pagination: default limit 48, default offset 0
     let limit = query.limit.unwrap_or(48);
     let offset = query.offset.unwrap_or(0);
@@ -667,7 +674,7 @@ async fn handle_update_comment(
     let project_id = path.into_inner().0;
     // Only owner or admin can update
     let user_email = claims.email;
-    let is_admin = std::env::var("AIM_ADMIN_EMAIL").map(|e| e == user_email).unwrap_or(false);
+    let is_admin = is_admin_email(&user_email);
     // Sanitize comment to escape single quotes
     let comment = payload.comment.replace("'", "''");
     // Build update SQL
@@ -705,8 +712,16 @@ async fn handle_delete_project(
     };
     let user_id = claims.sub;
     let project_id = path.into_inner().0;
-    // Execute deletion
-    let sql = format!("DELETE FROM projects WHERE id={} AND user_id={}", project_id, user_id);
+    // Determine if admin to allow deleting any project
+    let user_email = claims.email;
+    let is_admin = is_admin_email(&user_email);
+    // Build deletion filter: admin can delete by id only, others only own projects
+    let filter = if is_admin {
+        format!("id={}", project_id)
+    } else {
+        format!("id={} AND user_id={}", project_id, user_id)
+    };
+    let sql = format!("DELETE FROM projects WHERE {}", filter);
     match db.get_ref().execute(Statement::from_string(DbBackend::Sqlite, sql)).await {
         Ok(_) => HttpResponse::Ok().json(ApiResponse { success: true, message: "Project deleted".into(), token: None }),
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse { success: false, message: format!("Delete failed: {}", e), token: None }),
