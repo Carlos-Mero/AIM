@@ -608,19 +608,17 @@ impl Session for ResearchSession {
         let ts = Utc::now().to_rfc3339().replace("'", "''");
         let cfg_json = serde_json::to_string(&self.config)?;
         let init_mem = serde_json::to_string(&self.memory)?;
-        let mut ctx = self.memory.memory.iter()
+        // Determine if we need to fetch context via deer-flow
+        let ctx = self.memory.memory.iter()
             .find(|m| m.memtype == "context")
             .map(|m| m.content.clone()).unwrap_or_default();
-        if ctx.is_empty() {
-            // If there is no context information in this session,
-            // we will start a new deer-flow process to obtain required bkg
-            ctx = search_bkg_deer_flow(&self.config.problem).await?;
-            self.update_memory_graph(MemoryBlock::new()
-                .memtype("context")
-                .content(&ctx)
-                .solved(true)
-            );
-        }
+        let need_search = ctx.is_empty();
+        // Insert placeholder for initial project record
+        let ctx_for_insert = if need_search {
+            String::from("Researching via deer-flow...")
+        } else {
+            ctx.clone()
+        };
         let title = self.config.title.replace("'", "''");
         // initial lemma count from memory blocks
         let init_lemmas = self.memory.memory.iter().filter(|m| m.memtype == "lemma").count() as i32;
@@ -629,7 +627,7 @@ impl Session for ResearchSession {
             user_id,
             title,
             self.config.problem.replace("'", "''"),
-            ctx.replace("'", "''"),
+            ctx_for_insert.replace("'", "''"),
             cfg_json.replace("'", "''"),
             init_mem.replace("'", "''"),
             ts,
@@ -637,6 +635,31 @@ impl Session for ResearchSession {
             init_lemmas,
         );
         db.execute(Statement::from_string(DbBackend::Sqlite, insert_sql)).await?;
+        // If we need to fetch context, perform search and update the project record
+        if need_search {
+            // fetch context via deer-flow
+            let new_ctx = search_bkg_deer_flow(&self.config.problem).await?;
+            // update in-memory graph
+            self.update_memory_graph(MemoryBlock::new()
+                .memtype("context")
+                .content(&new_ctx)
+                .solved(true)
+            );
+            // prepare updated memory and timestamp
+            let mem_json = serde_json::to_string(&self.memory.memory)?;
+            let now = Utc::now().to_rfc3339().replace("'", "''");
+            let ctx_sql = new_ctx.replace("'", "''");
+            // update projects: context, memory, last_active
+            let upd_sql = format!(
+                "UPDATE projects SET context='{}', memory='{}', last_active='{}' WHERE user_id={} AND created_at='{}'",
+                ctx_sql,
+                mem_json.replace("'", "''"),
+                now,
+                user_id,
+                ts,
+            );
+            db.execute(Statement::from_string(DbBackend::Sqlite, upd_sql)).await?;
+        }
         // Exploration loop: update memory after each step
         let mut solved_flag = false;
         for _ in 0..self.config.steps {
