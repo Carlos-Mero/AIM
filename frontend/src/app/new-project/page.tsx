@@ -10,6 +10,8 @@ export default function NewProjectPage() {
   const { token, refresh } = useAuth();
   const [title, setTitle] = useState<string>('');
   const [problem, setProblem] = useState<string>('');
+  // Mode: 'standard' requires both problem and context; 'deer-flow' sends empty context
+  const [mode, setMode] = useState<'standard' | 'deer-flow'>('deer-flow');
   const [context, setContext] = useState<string>('');
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
   // Advanced parameters matching ResearchSessionConfig
@@ -24,10 +26,12 @@ export default function NewProjectPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // send empty context in 'deer-flow' mode
+    const contextToSend = mode === 'standard' ? context : '';
     const config = {
       title,
       problem,
-      context: context || undefined,
+      context: contextToSend,
       proofModel,
       evalModel,
       reformModel,
@@ -67,7 +71,33 @@ export default function NewProjectPage() {
             <h1 className="text-lg font-medium">创建新研究项目</h1>
           </header>
           <div className="px-8 py-6 space-y-6">
-            <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Mode switch: standard vs deer-flow */}
+            <div className="flex items-center space-x-4">
+              <span className="font-medium text-gray-700">Mode:</span>
+              <button
+                type="button"
+                onClick={() => setMode('standard')}
+                className={`px-3 py-1 rounded ${
+                  mode === 'standard'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-200 text-gray-700'
+                }`}
+              >
+                Standard
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('deer-flow')}
+                className={`px-3 py-1 rounded ${
+                  mode === 'deer-flow'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-200 text-gray-700'
+                }`}
+              >
+                Deer-Flow
+              </button>
+            </div>
           <div>
             <label htmlFor="title" className="block text-xl font-bold text-gray-900 mb-2">
               标题 (Title)
@@ -96,18 +126,23 @@ export default function NewProjectPage() {
               placeholder="在此输入问题的准确陈述，支持 Markdown、LaTeX"
             />
           </div>
-          <div>
-            <label htmlFor="context" className="block text-xl font-bold text-gray-900 mb-2">
-              背景与符号定义 (Context)
-            </label>
-            <textarea
-              value={context}
-              onChange={e => setContext(e.target.value)}
-              rows={6}
-              className="w-full border border-gray-300 rounded-md p-2 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="在此输入所有背景信息与符号定义（可选），支持 Markdown、LaTeX"
-            />
-          </div>
+          {/* Context input only in standard mode */}
+          {mode === 'standard' && (
+            <div>
+              <label htmlFor="context" className="block text-xl font-bold text-gray-900 mb-2">
+                背景与符号定义 (Context)
+              </label>
+              <textarea
+                id="context"
+                value={context}
+                onChange={e => setContext(e.target.value)}
+                required
+                rows={6}
+                className="w-full border border-gray-300 rounded-md p-2 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="在此输入所有背景信息与符号定义，支持 Markdown、LaTeX"
+              />
+            </div>
+          )}
           <div>
             <button
               type="button"
