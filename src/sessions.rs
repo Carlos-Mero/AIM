@@ -3,7 +3,7 @@ use std::fs;
 use std::sync::Arc;
 
 use crate::agents::{Agent, Explorer, Reviewer, Refiner, Formatter, MemoryBlock, Memory};
-use crate::utils::{extract_component, extract_all_component, find_box};
+use crate::utils::{extract_component, extract_all_component, find_box, search_bkg_deer_flow};
 use indicatif::{ProgressBar, ProgressStyle};
 use tokio::task::JoinSet;
 
@@ -109,11 +109,19 @@ impl ResearchSession {
         }
     }
 
-    pub fn load_context(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn load_context(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let context_path = self.config.logdir.as_path().join("context.md");
         if !context_path.exists() {
-            warn!("Problem context does not exist in session: {:#?}!", &context_path);
-            info!("Running AIM without problem context.");
+            info!("No context provided to this problem, searching for related info via deer-flow.");
+            let context = search_bkg_deer_flow(&self.config.problem).await?;
+            info!("loaded problem context: {:?}", &context);
+            self.memory.update(MemoryBlock::new()
+                .memtype("context")
+                .content(context)
+                .solved(true)
+            );
+            // warn!("Problem context does not exist in session: {:#?}!", &context_path);
+            // info!("Running AIM without problem context.");
             return Ok(());
         }
         let context = fs::read_to_string(context_path)?;
@@ -565,7 +573,7 @@ impl Session for ResearchSession {
                 }
             }
         } else {
-            self.load_context()?;
+            self.load_context().await?;
         }
 
         let pb = ProgressBar::new(self.config.steps.into()).with_style(ProgressStyle::with_template(
@@ -600,9 +608,19 @@ impl Session for ResearchSession {
         let ts = Utc::now().to_rfc3339().replace("'", "''");
         let cfg_json = serde_json::to_string(&self.config)?;
         let init_mem = serde_json::to_string(&self.memory)?;
-        let ctx = self.memory.memory.iter()
+        let mut ctx = self.memory.memory.iter()
             .find(|m| m.memtype == "context")
             .map(|m| m.content.clone()).unwrap_or_default();
+        if ctx.is_empty() {
+            // If there is no context information in this session,
+            // we will start a new deer-flow process to obtain required bkg
+            ctx = search_bkg_deer_flow(&self.config.problem).await?;
+            self.update_memory_graph(MemoryBlock::new()
+                .memtype("context")
+                .content(&ctx)
+                .solved(true)
+            );
+        }
         let title = self.config.title.replace("'", "''");
         // initial lemma count from memory blocks
         let init_lemmas = self.memory.memory.iter().filter(|m| m.memtype == "lemma").count() as i32;
