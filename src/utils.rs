@@ -1,6 +1,6 @@
 use regex::Regex;
 use regex::escape as regex_escape;
-use log::{info, warn};
+use log::{info, warn, error};
 use std::process::Stdio;
 use tokio::io::{AsyncWriteExt};
 use tokio::process::Command;
@@ -134,6 +134,9 @@ pub async fn search_bkg_deer_flow(problem: &str) -> Result<String, Box<dyn std::
     if output.status.success() {
         return Ok(extract_report_from_deer_flow(&String::from_utf8_lossy(&output.stderr)));
     } else {
+        error!("deer-flow process failed with status: {}", output.status);
+        error!("deer-flow stdout: {}", String::from_utf8_lossy(&output.stdout));
+        error!("deer-flow stderr: {}", String::from_utf8_lossy(&output.stderr));
         return Ok(String::new());
     }
 }
