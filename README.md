@@ -35,7 +35,7 @@ OPENAI_API_BASEURL=https://api.openai.com
 # Role & Invitation Codes (optional)
 # Specify an admin account that bypasses project limits:
 AIM_ADMIN_EMAIL=admin@example.com
-# Specify the invitation code for "invited" users (max 3 new projects per day):
+# Specify the invitation code for "invited" users (max 7 new projects per day):
 AIM_INV_CODE=your-invite-code
 ```
 
@@ -80,22 +80,21 @@ AIM supports both a single-session CLI workflow and a long-running server mode f
    ```
    Open http://localhost:3000 to start new sessions, visualize theorem graphs, explore proofs, and view logs. You can also run `npm run build` under the frontend folder. This will build up static frontend files of this project. The `aim` executable already equipped with static file serving capability. Then you can directly visiting localhost:4000 when `aim --server` is running.
 
+#### Deer-Flow Integration
+
+We also include support using [deer-flow](https://github.com/bytedance/deer-flow) to research for context of the given problem. With this feature we can simply start a research session with a given problem. deer-flow will first search for previous papers to obtain existing findings and methods around the given problem.
+
+To set up this feature you should firstly make sure you have installed [uv](https://docs.astral.sh/uv/) as the python virtual environment manager in your system. After that, please run these commands to initialize deer-flow under the root folder of AIM:
+
+```sh
+git submodule init
+git submodule update
+```
+
+After that you can enter `deer-flow` folder and follow the steps of official [README.md](https://github.com/bytedance/deer-flow) to set up its workflow, until you can successfully run `uv run main.py` and obtain the desired output. Then you can simply run `aim` without providing the context and it will automatically search for that for you via deer-flow.
+
 ### Command-Line Options
 Run `aim --help` for full details. Common flags include:
-```text
-  -p, --problem <PATH>        path to project dir containing problem.md
-  -m, --proof_model <NAME>    LLM for composing proofs (default: deepseek-r1)
-      --eval_model <NAME>     LLM for verifying proofs (default: deepseek-r1)
-      --reform_model <NAME>   LLM for refining proofs (default: deepseek-r1)
-  -s, --steps <N>             max exploration iterations (default: 24)
-  -r, --reviews <N>           parallel reviews count (default: 3)
-  -i, --iterations <N>        max refine iterations (default: 4)
-      --resume                resume from existing session
-      --reformat              reformat conjectures & proofs after exploration
-      --no_streaming          disable streaming output
-      --no_tgm                disable theorem-graph visualization
-      --server                run as long-running backend
-```
 
 ### Session Persistence & Logs
 - Intermediate state and memory are stored in `aim.db` in your project folder—use `--resume` to continue an interrupted run.
