@@ -591,7 +591,7 @@ async fn handle_get_project(
     // Check if the user is an admin to allow access to all projects
     let user_id = claims.sub;
     let user_email = claims.email;
-    let is_admin = std::env::var("AIM_ADMIN_EMAIL").map(|e| e == user_email).unwrap_or(false);
+    let is_admin = is_admin_email(&user_email);
     let project_id = path.into_inner().0;
     // Build SQL to fetch project details, including creator name
     // Fetch project detail including comment
