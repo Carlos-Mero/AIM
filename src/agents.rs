@@ -12,7 +12,7 @@ use std::env;
 use std::time::Duration;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(1800);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(18000);
 const API_RETRY_DELAY: Duration = Duration::from_secs(2);
 const MAX_REQWEST_RETRIES: u8 = 7;
 const MAX_CHUNK_DECODE_RETRIES: u8 = 16;
@@ -196,21 +196,21 @@ impl Memory {
 
         if res.is_empty() {None} else {Some(res)}
     }
-    pub fn format_all(&self, solved_only: bool) -> Option<String> {
-        // Format all memory blocks as the input of other agents
-        if self.memory.is_empty() {
-            None
-        } else {
-            Some(
-                self.memory
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, mem)| if solved_only {mem.is_solved()} else {true})
-                    .map(|(i, mem)| format!("#### Memory **ID: {i}**\n\n{}\n\n", mem._format()))
-                    .collect::<String>(),
-            )
-        }
-    }
+    // pub fn format_all(&self, solved_only: bool) -> Option<String> {
+    //     // Format all memory blocks as the input of other agents
+    //     if self.memory.is_empty() {
+    //         None
+    //     } else {
+    //         Some(
+    //             self.memory
+    //                 .iter()
+    //                 .enumerate()
+    //                 .filter(|(_, mem)| if solved_only {mem.is_solved()} else {true})
+    //                 .map(|(i, mem)| format!("#### Memory **ID: {i}**\n\n{}\n\n", mem._format()))
+    //                 .collect::<String>(),
+    //         )
+    //     }
+    // }
     pub fn format_all_with_proof(&self, solved_only: bool) -> Option<String> {
         // Format all memory blocks with proofs as the final output
         if self.memory.is_empty() {

@@ -274,7 +274,7 @@ impl ResearchSession {
             info!("Session Memory Updated with: {}", mem_str);
         }
         self.memory.update(nmemory);
-        if let Some(context) = self.memory.format_all(true) {
+        if let Some(context) = self.memory.format_all_with_proof(true) {
             self.explorer.set_context(&context);
             self.reviewer.set_context(&context);
             self.refiner.set_context(&context);
@@ -387,7 +387,7 @@ impl ResearchSession {
     }
 
     pub async fn graph_step(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
-        if let Some(context) = self.memory.format_all(true) {
+        if let Some(context) = self.memory.format_all_with_proof(true) {
             self.explorer.set_context(&context);
         }
         let raw_exploration = self.explorer._process().await?;
