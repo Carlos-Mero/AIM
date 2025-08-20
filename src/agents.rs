@@ -11,8 +11,8 @@ use dotenvy::dotenv;
 use std::env;
 use std::time::Duration;
 
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(18000);
+// const CONNECT_TIMEOUT: Duration = Duration::from_secs(6000);
+// const REQUEST_TIMEOUT: Duration = Duration::from_secs(18000);
 const API_RETRY_DELAY: Duration = Duration::from_secs(2);
 const MAX_REQWEST_RETRIES: u8 = 7;
 const MAX_CHUNK_DECODE_RETRIES: u8 = 16;
@@ -252,14 +252,13 @@ impl LMClient {
             "https://api.openai.com".into());
 
         let client = reqwest::Client::builder()
-            .no_proxy()
-            .connect_timeout(CONNECT_TIMEOUT)
-            .timeout(REQUEST_TIMEOUT)
+            // .connect_timeout(CONNECT_TIMEOUT)
+            // .timeout(REQUEST_TIMEOUT)
             .build().unwrap();
         LMClient { client: client, api_key: api_key, base_url: base_url.into() }
     }
 
-    async fn comp(&self, prompt: &str, model: &str, stream_output: bool) -> Result<String, Box<dyn std::error::Error>> {
+    async fn comp(&self, prompt: &str, model: &str, stream_output: bool, reasoning_effort: &str) -> Result<String, Box<dyn std::error::Error>> {
         let request_body = json!({
             "model": model,
             "messages": [
@@ -269,7 +268,8 @@ impl LMClient {
             }
         ],
             "temperature": 1.0,
-            "stream": true
+            "stream": true,
+            "reasoning_effort": reasoning_effort
         });
         let url = format!("{}/v1/chat/completions", &self.base_url.trim_end_matches('/').trim_end_matches("/v1"));
 
@@ -374,16 +374,18 @@ pub struct Explorer {
     problem: String,
     streaming: bool,
     context: Option<String>,
+    reasoning_effort: String,
 }
 
 impl Explorer {
     pub fn new() -> Self {
-        Explorer { client: LMClient::new(), model: String::new(), problem: String::new(), streaming: false, context: None }
+        Explorer { client: LMClient::new(), model: String::new(), problem: String::new(), streaming: false, context: None, reasoning_effort: "medium".into() }
     }
     pub fn model(mut self, model: impl Into<String>) -> Self {self.model = model.into(); self}
     pub fn streaming(mut self, streaming: bool) -> Self {self.streaming = streaming; self}
     pub fn set_problem(&mut self, problem: impl Into<String>) -> &Self {self.problem = problem.into(); self}
     pub fn set_context(&mut self, context: impl Into<String>) -> &Self {self.context = Some(context.into()); self}
+    pub fn reasoning_effort(mut self, effort: impl Into<String>) -> Self {self.reasoning_effort = effort.into(); self}
 }
 
 #[async_trait::async_trait]
@@ -417,7 +419,7 @@ impl Agent for Explorer {
         )
         + &context_prefix;
 
-        return self.client.comp(&prompt, &self.model, self.streaming).await;
+        return self.client.comp(&prompt, &self.model, self.streaming, &self.reasoning_effort).await;
     }
 }
 
@@ -430,11 +432,12 @@ pub struct Reviewer {
     reviews: u8,
     streaming: bool,
     context: Option<String>,
+    reasoning_effort: String,
 }
 
 impl Reviewer {
     pub fn new() -> Self {
-        Reviewer {client: LMClient::new(), model: String::new(), conjecture: String::new(), proof: String::new(), reviews: 0, streaming: false, context: None}
+        Reviewer {client: LMClient::new(), model: String::new(), conjecture: String::new(), proof: String::new(), reviews: 0, streaming: false, context: None, reasoning_effort: "medium".into()}
     }
     pub fn model(mut self, model: impl Into<String>) -> Self {self.model = model.into(); self}
     pub fn reviews(mut self, reviews: u8) -> Self {self.reviews = reviews; self}
@@ -442,6 +445,7 @@ impl Reviewer {
     pub fn set_conjecture(&mut self, conjecture: impl Into<String>) -> &Self {self.conjecture = conjecture.into(); self}
     pub fn set_proof(&mut self, proof: impl Into<String>) -> &Self {self.proof = proof.into(); self}
     pub fn set_context(&mut self, context: impl Into<String>) -> &Self {self.context = Some(context.into()); self}
+    pub fn reasoning_effort(mut self, effort: impl Into<String>) -> Self {self.reasoning_effort = effort.into(); self}
 
     pub async fn pverify(self: Arc<Self>) -> Option<String> {
         // pessimistic verification for the given conjecture and proof
@@ -507,7 +511,7 @@ impl Agent for Reviewer {
              "\n",
              "Please state your verification result inside $\\boxed{}$ as $\\boxed{valid}$ or $\\boxed{invalid}$. You also need to include the rationale on your decision in your response.\n",
              "\n").to_string() + &conjecture_proof + &context_prefix;
-        return self.client.comp(&prompt, &self.model, self.streaming).await;
+        return self.client.comp(&prompt, &self.model, self.streaming, &self.reasoning_effort).await;
     }
 }
 
@@ -519,11 +523,12 @@ pub struct Refiner {
     review: String,
     streaming: bool,
     context: Option<String>,
+    reasoning_effort: String,
 }
 
 impl Refiner {
     pub fn new() -> Self {
-        Refiner { client: LMClient::new(), model: String::new(), conjecture: String::new(), proof: String::new(), review: String::new(), streaming: false, context: None }
+        Refiner { client: LMClient::new(), model: String::new(), conjecture: String::new(), proof: String::new(), review: String::new(), streaming: false, context: None, reasoning_effort: "medium".into() }
     }
     pub fn model(mut self, model: impl Into<String>) -> Self {self.model = model.into(); self}
     pub fn streaming(mut self, streaming: bool) -> Self {self.streaming = streaming; self}
@@ -531,6 +536,7 @@ impl Refiner {
     pub fn set_proof(&mut self, proof: impl Into<String>) -> &Self {self.proof = proof.into(); self}
     pub fn set_review(&mut self, review: impl Into<String>) -> &Self {self.review = review.into(); self}
     pub fn set_context(&mut self, context: impl Into<String>) -> &Self {self.context = Some(context.into()); self}
+    pub fn reasoning_effort(mut self, effort: impl Into<String>) -> Self {self.reasoning_effort = effort.into(); self}
 }
 
 #[async_trait::async_trait]
@@ -550,7 +556,7 @@ impl Agent for Refiner {
             "2. And if you believe this conjecture itself is not true, please state the opposite of this conjecture inside \\begin{conjecture}\\end{conjecture}, and your rationales or proofs of this judgement inside \\begin{proof}\\end{proof}. Finally you should write down a \"\\boxed{false}\" at the end of your response.\n",
             "\n"
         ).to_string() + &conjecture_proof_review + &context_prefix;
-        return self.client.comp(&prompt, &self.model, self.streaming).await;
+        return self.client.comp(&prompt, &self.model, self.streaming, &self.reasoning_effort).await;
     }
 }
 
@@ -558,12 +564,14 @@ pub struct Formatter {
     client: LMClient,
     model: String,
     content: String,
+    reasoning_effort: String,
 }
 
 impl Formatter {
-    pub fn new() -> Self {Formatter { client: LMClient::new(), model: String::new(), content: String::new() }}
+    pub fn new() -> Self {Formatter { client: LMClient::new(), model: String::new(), content: String::new(), reasoning_effort: "medium".into() }}
     pub fn model(mut self, model: impl Into<String>) -> Self {self.model = model.into(); self}
     pub fn content(mut self, content: impl Into<String>) -> Self {self.content = content.into(); self}
+    pub fn reasoning_effort(mut self, effort: impl Into<String>) -> Self {self.reasoning_effort = effort.into(); self}
 }
 
 #[async_trait::async_trait]
@@ -579,6 +587,6 @@ impl Agent for Formatter {
             "\n",
             "Here is the original contents:\n",
             "\n").to_string() + &format!("\\begin{{contents}}{}\\end{{contents}}", self.content);
-        return self.client.comp(&prompt, &self.model, false).await;
+        return self.client.comp(&prompt, &self.model, false, &self.reasoning_effort).await;
     }
 }

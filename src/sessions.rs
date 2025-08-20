@@ -43,6 +43,7 @@ pub struct ResearchSessionConfig {
     reformat: bool, // reformat conjectures and proofs after exploration
     streaming: bool, // streaming output in exploration
     theorem_graph_mode: bool, // whether to use theorem graph mode
+    reasoning_effort: String, // new field for reasoning_effort
 }
 
 impl ResearchSessionConfig {
@@ -59,6 +60,7 @@ impl ResearchSessionConfig {
     pub fn reformat(mut self, reformat: bool) -> Self {self.reformat = reformat; self}
     pub fn streaming(mut self, streaming: bool) -> Self {self.streaming = streaming; self}
     pub fn theorem_graph_mode(mut self, tgm: bool) -> Self {self.theorem_graph_mode = tgm; self}
+    pub fn reasoning_effort(mut self, effort: impl Into<String>) -> Self {self.reasoning_effort = effort.into(); self}
     pub fn set_current_steps(&mut self, steps: u32) -> &Self {self.currect_steps = steps; self}
     pub fn set_problem(&mut self, problem: impl Into<String>) -> &Self {self.problem = problem.into(); self}
     pub fn set_context(&mut self, context: impl Into<String>) -> &Self {self.context = context.into(); self}
@@ -84,14 +86,17 @@ impl ResearchSession {
         info!("Initialized a ResearchSession with config: {:#?}", config);
         let explorer = Explorer::new()
             .model(&config.proof_model)
-            .streaming(config.streaming);
+            .streaming(config.streaming)
+            .reasoning_effort(config.reasoning_effort.clone());
         let reviewer = Reviewer::new()
             .model(&config.eval_model)
             .reviews(config.reviews)
-            .streaming(config.streaming && (config.reviews == 1));
+            .streaming(config.streaming && (config.reviews == 1))
+            .reasoning_effort(config.reasoning_effort.clone());
         let refiner = Refiner::new()
             .model(&config.proof_model)
-            .streaming(config.streaming);
+            .streaming(config.streaming)
+            .reasoning_effort(config.reasoning_effort.clone());
         let mut mem = Memory::new();
         if !config.context.is_empty() {
             mem.update(MemoryBlock::new()
@@ -308,7 +313,8 @@ impl ResearchSession {
             .map(|(i, mem)| {
                 let formatter = Formatter::new()
                     .model(&self.config.reform_model)
-                    .content(&mem.content);
+                    .content(&mem.content)
+                    .reasoning_effort(self.config.reasoning_effort.clone());
                 let pb = pb.clone();
                 tokio::task::spawn(async move {
                     let response = formatter._process().await.unwrap();
@@ -341,7 +347,8 @@ impl ResearchSession {
             .map(|(i, mem)| {
                 let formatter = Formatter::new()
                     .model(&self.config.reform_model)
-                    .content(&mem.proof);
+                    .content(&mem.proof)
+                    .reasoning_effort(self.config.reasoning_effort.clone());
                 let pb = pb.clone();
                 tokio::task::spawn(async move {
                     let response = formatter._process().await.unwrap();

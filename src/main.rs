@@ -19,13 +19,13 @@ struct Cli {
     problem: Option<String>,
 
     /// Proof Model that composes the proofs
-    #[arg(short = 'm', long = "proof_model", default_value = "deepseek-r1")]
+    #[arg(short = 'm', long = "proof_model", default_value = "gemini-2.5-pro")]
     proof_model: String,
     /// Eval Model that evaluates the proofs
-    #[arg(long = "eval_model", default_value = "deepseek-r1")]
+    #[arg(long = "eval_model", default_value = "gemini-2.5-pro")]
     eval_model: String,
     /// Reform Model that does other chores in the workflow
-    #[arg(long = "reform_model", default_value = "deepseek-r1")]
+    #[arg(long = "reform_model", default_value = "gemini-2.5-flash")]
     reform_model: String,
 
     /// Maximum exploration iterations
@@ -39,6 +39,10 @@ struct Cli {
     /// Maximum refine iterations
     #[arg(short = 'i', long = "iterations", default_value_t = 4)]
     iterations: u8,
+
+    /// Reasoning effort for API calls (e.g., "low", "medium", "high")
+    #[arg(long = "reasoning_effort", default_value = "medium")]
+    reasoning_effort: String,
 
     /// Resume from previous memory in a session directory
     #[arg(long = "resume", action = clap::ArgAction::SetTrue, default_value_t = false)]
@@ -90,7 +94,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .resume(cli.resume)
             .reformat(cli.reformat)
             .streaming(cli.streaming)
-            .theorem_graph_mode(cli.theorem_graph_mode);
+            .theorem_graph_mode(cli.theorem_graph_mode)
+            .reasoning_effort(cli.reasoning_effort);
         let _ = aim.run_session(config).await;
     } else if cli.server {
         // Bind to all interfaces on the given port
