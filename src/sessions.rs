@@ -2,7 +2,7 @@ use std::path::{PathBuf};
 use std::fs;
 use std::sync::Arc;
 
-use crate::agents::{Agent, Explorer, Reviewer, Refiner, Formatter, MemoryBlock, Memory};
+use crate::agents::{Agent, Explorer, Reviewer, Refiner, Formatter, ProofSummarizer, MemoryBlock, Memory};
 use crate::utils::{extract_component, extract_all_component, find_box, search_bkg_deer_flow};
 use indicatif::{ProgressBar, ProgressStyle};
 use tokio::task::JoinSet;
@@ -222,6 +222,24 @@ impl ResearchSession {
                 mem.set_reviews(0);
             }
             mem.set_solved(path_correctness);
+
+            // If this memory block is now solved and has a proof, generate a proof summary
+            if mem.is_solved() && !mem.proof.is_empty() && mem.proof_summary.is_empty() {
+                let summarizer = ProofSummarizer::new()
+                    .model(self.config.reform_model.clone())
+                    .conjecture(mem.content.clone())
+                    .proof(mem.proof.clone())
+                    .reasoning_effort(self.config.reasoning_effort.clone());
+                match summarizer._process().await {
+                    Ok(summary) => {
+                        mem.set_proof_summary(summary);
+                        info!("Generated proof summary for memory ID {}", i);
+                    }
+                    Err(e) => {
+                        warn!("Failed to generate proof summary for memory ID {}: {}", i, e);
+                    }
+                }
+            }
             debug!("Modified memblock: {:#?}", &mem);
         }
         Ok(path_correctness)
@@ -258,6 +276,7 @@ impl ResearchSession {
                 info!("One refinement complete for conjecture: {}.", memblock.content);
                 if !reproof.is_empty() {
                     memblock.set_comment(String::new());
+                    memblock.set_proof_summary(String::new());
                     if let Some(judgement) = find_box(&reproof) {
                         if judgement == "false" {
                             if let Some(n_conj) = extract_component(&reproof, "conjecture") {
@@ -279,7 +298,7 @@ impl ResearchSession {
             info!("Session Memory Updated with: {}", mem_str);
         }
         self.memory.update(nmemory);
-        if let Some(context) = self.memory.format_all_with_proof(true) {
+        if let Some(context) = self.memory.format_all_with_proof_summary(true) {
             self.explorer.set_context(&context);
             self.reviewer.set_context(&context);
             self.refiner.set_context(&context);
@@ -394,7 +413,7 @@ impl ResearchSession {
     }
 
     pub async fn graph_step(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
-        if let Some(context) = self.memory.format_all_with_proof(true) {
+        if let Some(context) = self.memory.format_all_with_proof_summary(true) {
             self.explorer.set_context(&context);
         }
         let raw_exploration = self.explorer._process().await?;

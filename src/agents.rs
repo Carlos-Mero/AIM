@@ -29,6 +29,7 @@ pub struct MemoryBlock {
     pub memtype: String,
     pub content: String,
     pub proof: String,
+    pub proof_summary: String,
     /// Timestamp when this memory block was created
     #[serde(default = "default_datetime")]
     pub created_at: DateTime<Utc>,
@@ -50,6 +51,7 @@ impl MemoryBlock {
             memtype: String::new(),
             content: String::new(),
             proof: String::new(),
+            proof_summary: String::new(),
             created_at: now,
             updated_at: now,
             solved: false,
@@ -70,6 +72,11 @@ impl MemoryBlock {
     }
     pub fn proof(mut self, proof: impl Into<String>) -> Self {
         self.proof = proof.into();
+        self.updated_at = Utc::now();
+        self
+    }
+    pub fn set_proof_summary(&mut self, proof_summary: impl Into<String>) -> &Self {
+        self.proof_summary = proof_summary.into();
         self.updated_at = Utc::now();
         self
     }
@@ -115,6 +122,19 @@ impl MemoryBlock {
             format!("\n\\begin{{proof}}\n{0}\n\\end{{proof}}", &self.proof)
         };
         format!("\\begin{{{0}}}\n{1}\n\n**DEPENDENCY**: {2:?}\n\\end{{{0}}}{3}", &self.memtype, &self.content, &self.deps, &proof_content)
+    }
+
+    pub fn _format_with_proof_summary(&self) -> String {
+        let ps_content = if self.proof_summary.is_empty() {String::new()} else {
+            format!("\n<proof_summary>\n{}\n</proof_summary>", &self.proof_summary)
+        };
+        format!(
+            "\\begin{{{0}}}\n{1}\n\n**DEPENDENCY**: {2:?}\n\\end{{{0}}}\n\n**Proof Sketch**{3}",
+            &self.memtype,
+            &self.content,
+            &self.deps,
+            &ps_content
+        )
     }
 }
 
@@ -222,6 +242,22 @@ impl Memory {
                     .enumerate()
                     .filter(|(_, mem)| if solved_only {mem.is_solved()} else {true})
                     .map(|(i, mem)| format!("#### Memory **ID: {i}**\n\n{}\n\n", mem._format_with_proof()))
+                    .collect::<String>(),
+            )
+        }
+    }
+
+    pub fn format_all_with_proof_summary(&self, solved_only: bool) -> Option<String> {
+        // Format all memory blocks with proofs and proof summaries as the final output
+        if self.memory.is_empty() {
+            None
+        } else {
+            Some(
+                self.memory
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, mem)| if solved_only {mem.is_solved()} else {true})
+                    .map(|(i, mem)| format!("#### Memory **ID: {i}**\n\n{}\n\n", mem._format_with_proof_summary()))
                     .collect::<String>(),
             )
         }
@@ -587,6 +623,46 @@ impl Agent for Formatter {
             "\n",
             "Here is the original contents:\n",
             "\n").to_string() + &format!("\\begin{{contents}}{}\\end{{contents}}", self.content);
+        return self.client.comp(&prompt, &self.model, false, &self.reasoning_effort).await;
+    }
+}
+
+pub struct ProofSummarizer {
+    client: LMClient,
+    model: String,
+    conjecture: String,
+    proof: String,
+    reasoning_effort: String,
+}
+
+impl ProofSummarizer {
+    pub fn new() -> Self {ProofSummarizer { client: LMClient::new(), model: String::new(), conjecture: String::new(), proof: String::new(), reasoning_effort: "medium".into() }}
+    pub fn model(mut self, model: impl Into<String>) -> Self {self.model = model.into(); self}
+    pub fn conjecture(mut self, conjecture: impl Into<String>) -> Self {self.conjecture = conjecture.into(); self}
+    pub fn proof(mut self, proof: impl Into<String>) -> Self {self.proof = proof.into(); self}
+    pub fn reasoning_effort(mut self, effort: impl Into<String>) -> Self {self.reasoning_effort = effort.into(); self}
+}
+
+#[async_trait::async_trait]
+impl Agent for ProofSummarizer {
+    async fn _process(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let prompt = concat!(
+            "You will be given a mathematical conjecture and its proof.\n",
+            "Your task is to carefully read and understand the proof, then produce a clear and concise summary that includes:\n",
+            "1. **Overall Overview** – a brief description of the main idea and approach of the proof.\n",
+            "2. **Key Steps** – the essential logical steps in the proof, listed or described in order.\n",
+            "3. **Main Ideas / Techniques** – important mathematical concepts, techniques, or strategies applied in the proof.\n",
+            "\n",
+            "Do not rewrite the full proof or include excessive details.\n",
+            "Focus on extracting and condensing the essence of the proof’s reasoning.\n",
+            "Present the final result strictly inside the following tags:\n",
+            "```\n",
+            "\\begin{summary}\n",
+            "[Your concise summary here]\n",
+            "\\end{summary}\n",
+            "```\n",
+            "Ensure that the summary is self-contained and understandable without referencing the original text.\n",
+            "\n").to_string() + &format!("\\begin{{conjecture}}{}\\end{{conjecture}}\n\\begin{{proof}}{}\\end{{proof}}", self.conjecture, self.proof);
         return self.client.comp(&prompt, &self.model, false, &self.reasoning_effort).await;
     }
 }
