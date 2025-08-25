@@ -2,15 +2,15 @@ use actix_web::{web, App, HttpResponse, HttpServer, Responder, HttpRequest};
 use actix_files::Files;
 use actix_cors::Cors;
 use bcrypt::{hash, verify, DEFAULT_COST};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use sea_orm::{Database, DatabaseConnection, Statement, EntityTrait, QueryFilter, ColumnTrait, ActiveModelTrait, Set, ConnectionTrait, DbBackend};
 use actix_web::web::Path;
-use serde::{Serialize};
 use crate::server::entity::user::{Entity as User, ActiveModel as UserActiveModel, Column as UserColumn};
 use jsonwebtoken::{encode, decode, EncodingKey, DecodingKey, Header, Algorithm, Validation};
 use crate::sessions::{ResearchSession, ResearchSessionConfig, Session};
 use log::{info, error};
-use serde::Deserialize;
+use serde::{Serialize, Deserialize};
+use crate::agents::default_datetime;
 use dotenvy::dotenv;
 /// Check if the given email is listed in the AIM_ADMIN_EMAIL env var (comma-separated)
 fn is_admin_email(user_email: &str) -> bool {
@@ -570,8 +570,25 @@ async fn handle_list_projects(
     }
 }
 
-    // GET /api/project/{id}
-    /// Return full project details including memory blocks
+// GET /api/project/{id}
+/// Return full project details including memory blocks
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MemoryBlockResponse {
+    pub memtype: String,
+    pub content: String,
+    pub proof: String,
+    /// Timestamp when this memory block was created
+    #[serde(default = "default_datetime")]
+    pub created_at: DateTime<Utc>,
+    /// Timestamp when this memory block was last modified
+    #[serde(default = "default_datetime")]
+    pub updated_at: DateTime<Utc>,
+    // Used in memory graph, working in process
+    solved: bool,
+    reviews: u8,
+    comment: String,
+    deps: Vec<usize>,
+}
 async fn handle_get_project(
     db: web::Data<DatabaseConnection>,
     req: HttpRequest,
@@ -615,7 +632,7 @@ async fn handle_get_project(
             let context: Option<String> = row.try_get("", "context").ok().flatten();
             let mem_json: String = row.try_get("", "memory").unwrap_or_default();
             let config_json: String = row.try_get("", "config").unwrap_or_default();
-            let memory: Vec<crate::agents::MemoryBlock> = serde_json::from_str(&mem_json).unwrap_or_default();
+            let memory: Vec<MemoryBlockResponse> = serde_json::from_str(&mem_json).unwrap_or_default();
             let created_at: String = row.try_get("", "created_at").unwrap_or_default();
             let last_active: String = row.try_get("", "last_active").unwrap_or_default();
             let lemmas_count: i32 = row.try_get("", "lemmas_count").unwrap_or_default();
@@ -628,7 +645,7 @@ async fn handle_get_project(
                 title: String,
                 problem: String,
                 context: Option<String>,
-                memory: Vec<crate::agents::MemoryBlock>,
+                memory: Vec<MemoryBlockResponse>,
                 created_at: String,
                 last_active: String,
                 lemmas_count: i32,

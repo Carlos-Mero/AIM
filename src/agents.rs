@@ -20,7 +20,7 @@ const MAX_CHUNK_DECODE_RETRIES: u8 = 16;
 use chrono::{DateTime, Utc};
 
 /// Provide default timestamp when deserializing older memory entries
-fn default_datetime() -> DateTime<Utc> {
+pub fn default_datetime() -> DateTime<Utc> {
     Utc::now()
 }
 
