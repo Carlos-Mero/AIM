@@ -19,13 +19,13 @@ struct Cli {
     problem: Option<String>,
 
     /// Proof Model that composes the proofs
-    #[arg(short = 'm', long = "proof_model", default_value = "gemini-2.5-pro")]
+    #[arg(short = 'm', long = "proof_model", default_value = "gpt-5")]
     proof_model: String,
     /// Eval Model that evaluates the proofs
-    #[arg(long = "eval_model", default_value = "gemini-2.5-pro")]
+    #[arg(long = "eval_model", default_value = "gpt-5")]
     eval_model: String,
     /// Reform Model that does other chores in the workflow
-    #[arg(long = "reform_model", default_value = "gemini-2.5-flash")]
+    #[arg(long = "reform_model", default_value = "gpt-5")]
     reform_model: String,
 
     /// Maximum exploration iterations
@@ -41,7 +41,7 @@ struct Cli {
     iterations: u8,
 
     /// Reasoning effort for API calls (e.g., "low", "medium", "high")
-    #[arg(long = "reasoning_effort", default_value = "medium")]
+    #[arg(long = "reasoning_effort", default_value = "high")]
     reasoning_effort: String,
 
     /// Resume from previous memory in a session directory

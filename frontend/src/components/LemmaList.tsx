@@ -1,5 +1,6 @@
 import React, { Dispatch, SetStateAction } from 'react';
 import Lemma from '@/interfaces/Lemma';
+import { useI18n } from '@/context/LanguageContext';
 import { FaCircle } from 'react-icons/fa';
 
 interface LemmaListProps {
@@ -13,6 +14,7 @@ const LemmaList: React.FC<LemmaListProps> = ({
   selectedLemma, 
   onSelectLemma 
 }) => {
+  const { t } = useI18n();
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'proved': return 'text-green-500';
@@ -31,9 +33,9 @@ const LemmaList: React.FC<LemmaListProps> = ({
     return 'bg-gray-100 text-gray-800';
   };
   const getImportanceText = (reviews: number, title: string) => {
-    if (isTheorem(title) || reviews >= 24) return '关键';
-    if (reviews >= 12) return '重要';
-    return '次要';
+    if (isTheorem(title) || reviews >= 24) return t('importance_key');
+    if (reviews >= 12) return t('importance_important');
+    return t('importance_minor');
   };
 
   return (
@@ -58,9 +60,9 @@ const LemmaList: React.FC<LemmaListProps> = ({
                   className={`text-xs mr-2 ${getStatusColor(lemma.status)}`} 
                 />
                 <span className="text-xs font-medium text-gray-600">
-                  {lemma.status === 'proved' ? '已证明' :
-                   lemma.status === 'in_progress' ? '证明中' :
-                   lemma.status === 'invalid' ? '无效' : '待处理'}
+                  {lemma.status === 'proved' ? t('status_proved') :
+                   lemma.status === 'in_progress' ? t('status_in_progress') :
+                   lemma.status === 'invalid' ? t('status_invalid') : t('status_pending')}
                 </span>
               </div>
             </div>
@@ -85,7 +87,7 @@ const LemmaList: React.FC<LemmaListProps> = ({
       
       {lemmas.length === 0 && (
         <div className="p-8 text-center">
-          <p className="text-gray-500">此项目还没有引理</p>
+          <p className="text-gray-500">{t('no_lemmas')}</p>
         </div>
       )}
     </div>

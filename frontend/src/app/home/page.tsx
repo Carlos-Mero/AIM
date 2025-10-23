@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import NavBar from '@/components/NavBar';
+import { useI18n } from '@/context/LanguageContext';
 import Link from 'next/link';
 import { FaPlus, FaSync } from 'react-icons/fa';
 
@@ -44,7 +45,8 @@ const HomePage: React.FC = () => {
   // Get current user name from auth context
   const { fullName, role } = useAuth();
   const isAdmin = role?.toLowerCase() === 'admin';
-  const userName = fullName ?? '访客';
+  const { t } = useI18n();
+  const userName = fullName ?? t('guest');
   // useEffect(() => {
   //   if (!token) router.push('/login');
   // }, [token]);
@@ -124,14 +126,14 @@ const HomePage: React.FC = () => {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="flex justify-between items-center mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-gray-800">您好，{userName.split(' ')[0]}</h1>
-            <p className="mt-2 text-gray-600">探索您的数学研究项目</p>
+            <h1 className="text-3xl font-bold text-gray-800">{t('helloUser', { name: userName.split(' ')[0] })}</h1>
+            <p className="mt-2 text-gray-600">{t('exploreProjects')}</p>
           </div>
           <Link href="/new-project">
             <button
               className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white py-3 px-6 rounded-lg font-medium hover:opacity-90 transition-opacity shadow-md flex items-center"
             >
-              <FaPlus className="mr-2" /> 新建项目
+              <FaPlus className="mr-2" /> {t('newProject')}
             </button>
           </Link>
         </div>
@@ -140,7 +142,7 @@ const HomePage: React.FC = () => {
         <div>
           {/* 标题与刷新按钮 */}
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-2xl font-semibold text-gray-800">您的研究项目 ({projects.length})</h2>
+            <h2 className="text-2xl font-semibold text-gray-800">{t('yourProjects', { count: projects.length })}</h2>
             <button
               onClick={handleRefresh}
               disabled={refreshDisabled}
@@ -151,20 +153,20 @@ const HomePage: React.FC = () => {
                   : 'bg-gray-200 text-gray-800 hover:bg-gray-300')
               }
             >
-              <FaSync className={loading ? 'mr-2 animate-spin' : 'mr-2'} /> 刷新
+              <FaSync className={loading ? 'mr-2 animate-spin' : 'mr-2'} /> {t('refresh')}
             </button>
           </div>
-          {loading && <p className="text-gray-600">加载中...</p>}
+          {loading && <p className="text-gray-600">{t('loading')}</p>}
           {error && <p className="text-red-600">{error}</p>}
           
           {filteredProjects.length === 0 ? (
             <div className="bg-white rounded-2xl shadow-md p-8 text-center">
-              <p className="text-gray-600 mb-4">没有找到匹配的项目</p>
+              <p className="text-gray-600 mb-4">{t('noMatch')}</p>
               <button 
                 onClick={() => setSearchQuery("")}
                 className="text-blue-600 hover:text-blue-800 font-medium"
               >
-                清空搜索
+                {t('clearSearch')}
               </button>
             </div>
           ) : (
@@ -187,7 +189,7 @@ const HomePage: React.FC = () => {
                 <p className="text-gray-600 mb-4 h-14 line-clamp-2">{project.problem}</p>
                 <div className="flex justify-between text-sm text-gray-500">
                   <div>
-                    <span className="font-medium">引理: </span>
+                    <span className="font-medium">{t('lemmas')}</span>
                     <span className="text-blue-600 font-bold">{project.lemmas_count}</span>
                   </div>
                   <span>{timeAgo(project.last_active)}</span>
@@ -195,26 +197,26 @@ const HomePage: React.FC = () => {
               </div>
           <div className="bg-gray-50 px-6 py-3 border-t border-gray-100 flex justify-between items-center">
             {isAdmin ? (
-              <span className="text-gray-700 text-sm">创建者：{project.creator || '---'}</span>
+              <span className="text-gray-700 text-sm">{t('creator')}{project.creator || '---'}</span>
             ) : (
               <span
                 className="text-blue-600 hover:text-blue-800 font-medium cursor-pointer"
                 onClick={e => { e.stopPropagation(); router.push(`/project?projectId=${project.id}`); }}
-              >查看项目详情</span>
+              >{t('viewDetails')}</span>
             )}
             <button
               className="text-gray-500 hover:text-gray-700 font-medium"
               onClick={async e => {
                 e.stopPropagation();
-                if (!window.confirm('确认要删除该项目吗？此操作不可撤销。')) return;
+                if (!window.confirm(t('confirmDelete'))) return;
                 const token = localStorage.getItem('token');
                 const res = await fetch(`/api/project/${project.id}`, {
                   method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` }
                 });
                 if (res.ok) setProjects(prev => prev.filter(p => p.id !== project.id));
-                else alert('删除失败');
+                else alert(t('deleteFailed'));
               }}
-            >删除</button>
+            >{t('delete')}</button>
           </div>
             </div>
           ))}
@@ -225,7 +227,7 @@ const HomePage: React.FC = () => {
                   className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
                   onClick={() => loadProjects(offset)}
                   disabled={loading}
-                >加载更多</button>
+                >{t('loadMore')}</button>
               </div>
             )}
             </>

@@ -375,7 +375,12 @@ struct NewProjectRequest {
     iterations: u8,
     reformat: bool,
     theorem_graph: bool,
+    /// Reasoning effort for reasoning-capable models ("minimal" | "low" | "medium" | "high")
+    #[serde(default = "default_reasoning_effort")]
+    reasoning_effort: String,
 }
+
+fn default_reasoning_effort() -> String { "high".into() }
 
 /// Handle creating a new research project: for now just log the received config
 /// Create & start a remote research session for the authenticated user
@@ -448,7 +453,7 @@ async fn handle_new_project(
     // Build session config from request
     let req = payload.into_inner();
     // Log project config
-    info!("User {} project config: {{ problem: {}, context: {:?}, proof_model: {}, eval_model: {}, reform_model: {}, steps: {}, reviews: {}, iterations: {}, reformat: {}, theorem_graph: {} }}",
+    info!("User {} project config: {{ problem: {}, context: {:?}, proof_model: {}, eval_model: {}, reform_model: {}, steps: {}, reviews: {}, iterations: {}, reformat: {}, theorem_graph: {}, reasoning_effort: {} }}",
         user_id,
         req.problem,
         req.context,
@@ -459,7 +464,8 @@ async fn handle_new_project(
         req.reviews,
         req.iterations,
         req.reformat,
-        req.theorem_graph
+        req.theorem_graph,
+        req.reasoning_effort
     );
     let mut config = ResearchSessionConfig::new()
         .title(req.title.clone())
@@ -471,7 +477,8 @@ async fn handle_new_project(
         .iterations(req.iterations)
         .reformat(req.reformat)
         .streaming(false)
-        .theorem_graph_mode(req.theorem_graph);
+        .theorem_graph_mode(req.theorem_graph)
+        .reasoning_effort(req.reasoning_effort);
     config.set_problem(req.problem);
     if let Some(c) = req.context {
         config.set_context(c);

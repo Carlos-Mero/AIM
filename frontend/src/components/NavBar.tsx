@@ -2,7 +2,8 @@
 
 import React, { useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { FaBook, FaCog, FaSignOutAlt, FaUser, FaQuestionCircle } from 'react-icons/fa';
+import { useI18n } from '@/context/LanguageContext';
+import { FaBook, FaCog, FaSignOutAlt, FaUser, FaQuestionCircle, FaGlobe } from 'react-icons/fa';
 import SettingsModal from './SettingsModal';
 import HelpModal from './HelpModal';
 import { useRouter } from 'next/navigation';
@@ -10,9 +11,10 @@ import { useRouter } from 'next/navigation';
 export default function NavBar() {
   const router = useRouter();
   const { fullName, role, credits, logout } = useAuth();
+  const { t, lang, setLang } = useI18n();
   const [showHelp, setShowHelp] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const userName = fullName ?? '访客';
+  const userName = fullName ?? t('guest');
 
   const handleSignOut = async () => {
     // Notify backend (stateless logout)
@@ -51,21 +53,29 @@ export default function NavBar() {
               onClick={() => setShowSettings(true)}
             >
               <FaCog className="mr-1" />
-              <span className="hidden md:block">设置</span>
+              <span className="hidden md:block">{t('settings')}</span>
             </button>
             <button
               className="text-blue-200 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center"
               onClick={handleSignOut}
             >
               <FaSignOutAlt className="mr-1" />
-              <span className="hidden md:block">退出</span>
+              <span className="hidden md:block">{t('signOut')}</span>
             </button>
             <button
               className="text-blue-200 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center"
               onClick={() => setShowHelp(true)}
             >
               <FaQuestionCircle className="mr-1" />
-              <span className="hidden md:block">帮助</span>
+              <span className="hidden md:block">{t('help')}</span>
+            </button>
+            <button
+              className="text-blue-200 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center"
+              onClick={() => setLang(lang === 'en' ? 'zh' : 'en')}
+              aria-label="Toggle language"
+            >
+              <FaGlobe className="mr-1" />
+              <span className="hidden md:block">{lang === 'en' ? '中文' : 'English'}</span>
             </button>
           </div>
           <HelpModal show={showHelp} onClose={() => setShowHelp(false)} />

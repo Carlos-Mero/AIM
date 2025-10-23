@@ -6,12 +6,14 @@ import { BlockMath, InlineMath } from 'react-katex';
 import 'katex/dist/katex.min.css';
 import { FaCheck, FaHourglassHalf, FaTimes } from 'react-icons/fa';
 import CopyableBlock from './CopyableBlock';
+import { useI18n } from '@/context/LanguageContext';
 
 interface LemmaDetailProps {
   lemma: Lemma;
 }
 
 const LemmaDetail: React.FC<LemmaDetailProps> = ({ lemma }) => {
+  const { t } = useI18n();
   // 将引理的证明文本转换为标题、段落，并支持行内/块级数学公式
   const renderProofContent = () => {
     return lemma.proof.split(/\n{2,}/).map((para, idx) => {
@@ -82,9 +84,9 @@ const LemmaDetail: React.FC<LemmaDetailProps> = ({ lemma }) => {
   const isTheorem = () => lemma.title.toLowerCase().includes('theorem');
   // 次要 (<12), 重要 (12–23), 关键 (>=24 or theorem)
   const getImportanceText = () => {
-    if (isTheorem() || lemma.reviews >= 24) return '关键';
-    if (lemma.reviews >= 12) return '重要';
-    return '次要';
+    if (isTheorem() || lemma.reviews >= 24) return t('importance_key');
+    if (lemma.reviews >= 12) return t('importance_important');
+    return t('importance_minor');
   };
   const getImportanceColor = () => {
     if (isTheorem() || lemma.reviews >= 24) return 'text-red-600 bg-red-100';
@@ -136,28 +138,28 @@ const LemmaDetail: React.FC<LemmaDetailProps> = ({ lemma }) => {
             <h2 className="text-2xl font-bold text-gray-800 mb-2">{lemma.title}</h2>
             <div className="flex items-center space-x-6 mb-4">
               <div className="flex items-center">
-                <span className="text-gray-600 mr-2">状态:</span>
+                <span className="text-gray-600 mr-2">{t('status_label')}</span>
                 <span className="flex items-center text-gray-600 font-medium">
                   {getStatusIcon()}
                   <span className="ml-2">
-                    {lemma.status === 'proved' ? '已证明' :
-                     lemma.status === 'in_progress' ? '证明中' :
-                     lemma.status === 'invalid' ? '无效' : '待处理'}
+                    {lemma.status === 'proved' ? t('status_proved') :
+                     lemma.status === 'in_progress' ? t('status_in_progress') :
+                     lemma.status === 'invalid' ? t('status_invalid') : t('status_pending')}
                   </span>
                 </span>
               </div>
               <div className="flex items-center">
-                <span className="text-gray-600 mr-2">重要性:</span>
+                <span className="text-gray-600 mr-2">{t('importance_label')}</span>
                 <span className={`px-2 py-1 rounded-full ${getImportanceColor()}`}>{getImportanceText()}</span>
               </div>
               {/* 显示评审次数和依赖关系 */}
               <div className="flex items-center">
-                <span className="text-gray-600 mr-2">评审次数:</span>
+                <span className="text-gray-600 mr-2">{t('reviews_count_label')}</span>
                 <span className="font-medium text-gray-600">{lemma.reviews}</span>
               </div>
               <div className="flex items-center">
-                <span className="text-gray-600 mr-2">依赖：</span>
-                <span className="font-medium text-gray-600">{lemma.deps.join(', ') || '无'}</span>
+                <span className="text-gray-600 mr-2">{t('dependencies_label')}</span>
+                <span className="font-medium text-gray-600">{lemma.deps.join(', ') || t('none')}</span>
               </div>
             </div>
           </div>
@@ -167,7 +169,7 @@ const LemmaDetail: React.FC<LemmaDetailProps> = ({ lemma }) => {
         {/* 引理陈述 - 支持行内/块级公式，避免 <div> 嵌套在 <p> */}
         <CopyableBlock text={lemma.statement}>
           <div className="bg-white rounded-lg text-gray-600 p-4 shadow-inner border border-gray-200 mt-4 prose">
-            <h3 className="text-lg font-semibold mb-3 text-blue-700">引理陈述:</h3>
+            <h3 className="text-lg font-semibold mb-3 text-blue-700">{t('lemma_statement')}</h3>
             {lemma.statement.split(/\n{2,}/).flatMap((para, pidx) => {
             // 支持 $$..$$, \[..\], \(..\) 块/行内和 $..$ 行内公式
             const tokens = para.split(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$[^$\n]+\$)/g).filter(Boolean);
@@ -214,7 +216,7 @@ const LemmaDetail: React.FC<LemmaDetailProps> = ({ lemma }) => {
       {/* 引理证明内容：展示完整证明，无滚动 */}
       <CopyableBlock text={lemma.proof}>
         <div className="p-6">
-          <h3 className="text-xl font-bold mb-4 text-blue-800">证明:</h3>
+          <h3 className="text-xl font-bold mb-4 text-blue-800">{t('proof')}</h3>
           <div className="prose max-w-none text-gray-700">
             {renderProofContent()}
           </div>
@@ -224,7 +226,7 @@ const LemmaDetail: React.FC<LemmaDetailProps> = ({ lemma }) => {
       {lemma.comment && (
         <CopyableBlock text={lemma.comment}>
           <div className="p-4 bg-yellow-50 border-t border-yellow-200 text-sm text-gray-800">
-            <h4 className="font-semibold mb-2 text-yellow-800">评审评论:</h4>
+            <h4 className="font-semibold mb-2 text-yellow-800">{t('review_comment')}</h4>
             <div className="prose max-w-none">
               {renderCommentContent()}
             </div>
@@ -233,8 +235,8 @@ const LemmaDetail: React.FC<LemmaDetailProps> = ({ lemma }) => {
       )}
       {/* 底部元数据 */}
       <div className="pt-4 pw-4 border-t border-gray-200 text-sm text-gray-500 flex justify-between">
-        <span>创建时间: {lemma.createdAt}</span>
-        <span>最后更新: {lemma.lastUpdated}</span>
+        <span>{t('created_at_label')} {lemma.createdAt}</span>
+        <span>{t('last_updated_label')} {lemma.lastUpdated}</span>
       </div>
     </div>
   );

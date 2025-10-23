@@ -295,14 +295,13 @@ impl LMClient {
     }
 
     async fn comp(&self, prompt: &str, model: &str, stream_output: bool, reasoning_effort: &str) -> Result<String, Box<dyn std::error::Error>> {
+        // Always send stream=true since SSE client expects event stream
+        // Always include reasoning_effort; non-supporting models ignore it.
         let request_body = json!({
             "model": model,
             "messages": [
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
+                {"role": "user", "content": prompt}
+            ],
             "temperature": 1.0,
             "stream": true,
             "reasoning_effort": reasoning_effort

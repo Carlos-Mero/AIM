@@ -5,10 +5,12 @@ import { useRouter } from 'next/navigation';
 import { FaUser, FaLock, FaGithub } from 'react-icons/fa';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
+import { useI18n } from '@/context/LanguageContext';
 
 const Login: React.FC = () => {
   const router = useRouter();
   const { login } = useAuth();
+  const { t } = useI18n();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -29,10 +31,10 @@ const Login: React.FC = () => {
         // Navigate directly to dashboard
         router.replace('/home');
       } else {
-        setError(data.message || '登录失败');
+        setError(data.message || t('login_failed'));
       }
     } catch {
-      setError('网络错误，请稍后重试');
+      setError(t('network_error'));
     }
   };
 
@@ -41,14 +43,14 @@ const Login: React.FC = () => {
       <div className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden">
         <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-8 text-center">
           <h1 className="text-3xl font-bold text-white">AI Mathematician</h1>
-          <p className="text-blue-200 mt-2">登录您的数学家助手账户</p>
+          <p className="text-blue-200 mt-2">{t('login_subtitle')}</p>
         </div>
         
         <form onSubmit={handleSubmit} className="p-8">
           {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
           <div className="mb-6">
             <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-              邮箱地址
+              {t('email_label')}
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -68,7 +70,7 @@ const Login: React.FC = () => {
           
           <div className="mb-6">
             <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-              密码
+              {t('password_label')}
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -88,7 +90,7 @@ const Login: React.FC = () => {
           
         <div className="mb-6 text-right">
           <a href="#" className="font-medium text-blue-600 hover:text-blue-500">
-            忘记密码?
+            {t('forgot_password')}
           </a>
         </div>
           
@@ -96,14 +98,14 @@ const Login: React.FC = () => {
             type="submit"
             className="w-full bg-gradient-to-r from-blue-600 to-indigo-700 text-white py-3 px-4 rounded-lg font-medium hover:opacity-90 transition-opacity shadow-md"
           >
-            登录
+            {t('login_button')}
           </button>
           
           
           <p className="mt-8 text-center text-sm text-gray-600">
-            还没有账户?{' '}
+            {t('no_account')}{' '}
             <Link href="/signup" className="font-medium text-blue-600 hover:text-blue-500">
-              立即注册
+              {t('signup_now')}
             </Link>
           </p>
           <p className="mt-4 text-center text-sm text-gray-600">

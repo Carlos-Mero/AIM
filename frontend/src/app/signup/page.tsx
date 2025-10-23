@@ -5,6 +5,7 @@ import TermsModal from '../../components/TermsModal';
 import { useRouter } from 'next/navigation';
 import { FaUser, FaEnvelope, FaLock, FaUniversity, FaKey } from 'react-icons/fa';
 import Link from 'next/link';
+import { useI18n } from '@/context/LanguageContext';
 
 const Signup: React.FC = () => {
   const [formData, setFormData] = useState({
@@ -22,6 +23,7 @@ const Signup: React.FC = () => {
   };
 
   const router = useRouter();
+  const { t } = useI18n();
   const [error, setError] = useState<string | null>(null);
   const [showTerms, setShowTerms] = useState(false);
   const [showPolicy, setShowPolicy] = useState(false);
@@ -39,11 +41,11 @@ const Signup: React.FC = () => {
         // after signup, redirect to login
         router.push('/login');
       } else {
-        setError(data.message || '注册失败');
+        setError(data.message || t('signup_failed'));
       }
     } catch (err) {
       console.error(err);
-      setError('网络错误，请稍后重试');
+      setError(t('network_error'));
     }
   };
 
@@ -52,14 +54,14 @@ const Signup: React.FC = () => {
       <div className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden">
         <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-8 text-center">
           <h1 className="text-3xl font-bold text-white">AI Mathematician</h1>
-          <p className="text-blue-200 mt-2">创建您的数学家助手账户</p>
+          <p className="text-blue-200 mt-2">{t('signup_subtitle')}</p>
         </div>
         
         <form onSubmit={handleSubmit} className="p-8">
           {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
           <div className="mb-4">
             <label htmlFor="fullName" className="block text-sm font-medium text-gray-700 mb-1">
-              姓名
+              {t('name_label')}
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -72,7 +74,7 @@ const Signup: React.FC = () => {
                 value={formData.fullName}
                 onChange={handleChange}
                 className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 placeholder-gray-400"
-                placeholder="全名"
+                placeholder={t('name_label')}
                 required
               />
             </div>
@@ -80,7 +82,7 @@ const Signup: React.FC = () => {
           
           <div className="mb-4">
             <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-              学术邮箱
+              {t('academic_email_label')}
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -101,7 +103,7 @@ const Signup: React.FC = () => {
           
           <div className="mb-4">
             <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-              密码
+              {t('password_label')}
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -114,7 +116,7 @@ const Signup: React.FC = () => {
                 value={formData.password}
                 onChange={handleChange}
                 className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 placeholder-gray-400"
-                placeholder="至少8个字符"
+                placeholder={t('password_placeholder_min8')}
                 minLength={8}
                 required
               />
@@ -123,7 +125,7 @@ const Signup: React.FC = () => {
           
           <div className="mb-4">
             <label htmlFor="affiliation" className="block text-sm font-medium text-gray-700 mb-1">
-              所属机构
+              {t('affiliation_label')}
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -136,7 +138,7 @@ const Signup: React.FC = () => {
                 value={formData.affiliation}
                 onChange={handleChange}
                 className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 placeholder-gray-400"
-                placeholder="大学或研究机构"
+                placeholder={t('affiliation_placeholder')}
                 required
               />
             </div>
@@ -144,7 +146,7 @@ const Signup: React.FC = () => {
           
           <div className="mb-6">
             <label htmlFor="specialization" className="block text-sm font-medium text-gray-700 mb-1">
-              数学领域
+              {t('math_field_label')}
             </label>
             <select
               id="specialization"
@@ -154,21 +156,21 @@ const Signup: React.FC = () => {
               className={`block w-full py-3 px-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${formData.specialization ? 'text-gray-900' : 'text-gray-400'}`}
               required
             >
-              <option value="" disabled>请选择您的研究领域</option>
-              <option value="algebra">代数</option>
-              <option value="analysis">分析</option>
-              <option value="geometry">几何</option>
-              <option value="topology">拓扑学</option>
-              <option value="number-theory">数论</option>
-              <option value="applied-math">应用数学</option>
-              <option value="statistics">统计学</option>
-              <option value="other">其他</option>
+              <option value="" disabled>{t('choose_field')}</option>
+              <option value="algebra">{t('field_algebra')}</option>
+              <option value="analysis">{t('field_analysis')}</option>
+              <option value="geometry">{t('field_geometry')}</option>
+              <option value="topology">{t('field_topology')}</option>
+              <option value="number-theory">{t('field_number_theory')}</option>
+              <option value="applied-math">{t('field_applied_math')}</option>
+              <option value="statistics">{t('field_statistics')}</option>
+              <option value="other">{t('field_other')}</option>
             </select>
           </div>
           {/* 邀请码（可选） */}
           <div className="mb-6">
             <label htmlFor="invitationCode" className="block text-sm font-medium text-gray-700 mb-1">
-              邀请码 (Invitation Code, 可选)
+              {t('invitation_label')}
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -181,7 +183,7 @@ const Signup: React.FC = () => {
                 value={formData.invitationCode}
                 onChange={handleChange}
                 className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 placeholder-gray-400"
-                placeholder="如果有，请输入邀请码"
+                placeholder={t('invitation_placeholder')}
               />
             </div>
           </div>
@@ -195,21 +197,21 @@ const Signup: React.FC = () => {
                 required
               />
               <label htmlFor="terms" className="ml-2 block text-sm text-gray-700">
-                我同意 AI Mathematician 的 
+                {t('agree_prefix')}
                 <a
                   href="#"
                   onClick={e => { e.preventDefault(); e.stopPropagation(); setShowTerms(true); }}
                   className="text-blue-600 hover:underline"
                 >
-                  服务条款
+                  {t('terms_of_service')}
                 </a>
-                {' '}和{' '}
+                {t('and')}
                 <a
                   href="#"
                   onClick={e => { e.preventDefault(); e.stopPropagation(); setShowPolicy(true); }}
                   className="text-blue-600 hover:underline"
                 >
-                  隐私政策
+                  {t('privacy_policy')}
                 </a>
               </label>
             </div>
@@ -219,29 +221,29 @@ const Signup: React.FC = () => {
             type="submit"
             className="w-full bg-gradient-to-r from-blue-600 to-indigo-700 text-white py-3 px-4 rounded-lg font-medium hover:opacity-90 transition-opacity shadow-md"
           >
-            创建账户
+            {t('create_account')}
           </button>
           
           <p className="mt-8 text-center text-sm text-gray-600">
-            已有账户?{' '}
+            {t('have_account')}{' '}
             <Link href="/login" className="font-medium text-blue-600 hover:text-blue-500">
-              立即登录
+              {t('login_now')}
             </Link>
           </p>
         </form>
         <TermsModal
           isOpen={showTerms}
           onClose={() => setShowTerms(false)}
-          title="服务条款"
+          title={t('terms_title')}
         >
-          <p>此处填写服务条款内容。</p>
+          <p>{t('terms_body')}</p>
         </TermsModal>
         <TermsModal
           isOpen={showPolicy}
           onClose={() => setShowPolicy(false)}
-          title="隐私政策"
+          title={t('privacy_title')}
         >
-          <p>此处填写隐私政策内容。</p>
+          <p>{t('privacy_body')}</p>
         </TermsModal>
       </div>
     </div>

@@ -4,10 +4,12 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import NavBar from '@/components/NavBar';
+import { useI18n } from '@/context/LanguageContext';
 
 export default function NewProjectPage() {
   const router = useRouter();
   const { token, refresh } = useAuth();
+  const { t } = useI18n();
   const [title, setTitle] = useState<string>('');
   const [problem, setProblem] = useState<string>('');
   // Mode: 'standard' requires both problem and context; 'deer-flow' sends empty context
@@ -15,9 +17,10 @@ export default function NewProjectPage() {
   const [context, setContext] = useState<string>('');
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
   // Advanced parameters matching ResearchSessionConfig
-  const [proofModel, setProofModel] = useState<string>('o4-mini');
-  const [evalModel, setEvalModel] = useState<string>('o4-mini');
-  const [reformModel, setReformModel] = useState<string>('o4-mini');
+  const [proofModel, setProofModel] = useState<string>('gpt-5');
+  const [evalModel, setEvalModel] = useState<string>('gpt-5');
+  const [reformModel, setReformModel] = useState<string>('gpt-5');
+  const [reasoningEffort, setReasoningEffort] = useState<'minimal'|'low'|'medium'|'high'>('high');
   const [steps, setSteps] = useState<number>(24);
   const [reviews, setReviews] = useState<number>(3);
   const [iterations, setIterations] = useState<number>(4);
@@ -35,6 +38,7 @@ export default function NewProjectPage() {
       proofModel,
       evalModel,
       reformModel,
+      reasoningEffort,
       steps,
       reviews,
       iterations,
@@ -58,7 +62,7 @@ export default function NewProjectPage() {
       console.error('Failed to submit project:', err);
       // show a pop-up alert on failure
       const msg = err instanceof Error ? err.message : String(err);
-      window.alert(`创建项目失败：${msg}`);
+      window.alert(t('create_project_failed', { msg }));
     }
   };
 
@@ -68,13 +72,13 @@ export default function NewProjectPage() {
       <main className="w-full max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="bg-white rounded-2xl shadow-md overflow-hidden">
           <header className="bg-blue-600 text-white px-6 py-2">
-            <h1 className="text-lg font-medium">创建新研究项目</h1>
+            <h1 className="text-lg font-medium">{t('create_project_header')}</h1>
           </header>
           <div className="px-8 py-6 space-y-6">
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Mode switch: standard vs deer-flow */}
             <div className="flex items-center space-x-4">
-              <span className="font-medium text-gray-700">Mode:</span>
+              <span className="font-medium text-gray-700">{t('mode_label')}</span>
               <button
                 type="button"
                 onClick={() => setMode('standard')}
@@ -84,7 +88,7 @@ export default function NewProjectPage() {
                     : 'bg-gray-200 text-gray-700'
                 }`}
               >
-                Standard
+                {t('mode_standard')}
               </button>
               <button
                 type="button"
@@ -95,12 +99,12 @@ export default function NewProjectPage() {
                     : 'bg-gray-200 text-gray-700'
                 }`}
               >
-                Deer-Flow
+                {t('mode_deer_flow')}
               </button>
             </div>
           <div>
             <label htmlFor="title" className="block text-xl font-bold text-gray-900 mb-2">
-              标题 (Title)
+              {t('title_label')}
             </label>
             <input
               id="title"
@@ -109,12 +113,12 @@ export default function NewProjectPage() {
               onChange={e => setTitle(e.target.value)}
               required
               className="w-full rounded-lg border border-gray-300 p-2 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="请输入研究项目的标题"
+              placeholder={t('title_placeholder')}
             />
           </div>
           <div>
             <label htmlFor="problem" className="block text-xl font-bold text-gray-900 mb-2">
-              问题 (Problem)
+              {t('problem_label')}
             </label>
             <textarea
               id="problem"
@@ -123,14 +127,14 @@ export default function NewProjectPage() {
               required
               rows={6}
               className="w-full rounded-lg border border-gray-300 p-2 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="在此输入问题的准确陈述，支持 Markdown、LaTeX"
+              placeholder={t('problem_placeholder')}
             />
           </div>
           {/* Context input only in standard mode */}
           {mode === 'standard' && (
             <div>
               <label htmlFor="context" className="block text-xl font-bold text-gray-900 mb-2">
-                背景与符号定义 (Context)
+                {t('context_label')}
               </label>
               <textarea
                 id="context"
@@ -139,7 +143,7 @@ export default function NewProjectPage() {
                 required
                 rows={6}
                 className="w-full border border-gray-300 rounded-md p-2 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="在此输入所有背景信息与符号定义，支持 Markdown、LaTeX"
+                placeholder={t('context_placeholder')}
               />
             </div>
           )}
@@ -149,14 +153,14 @@ export default function NewProjectPage() {
               onClick={() => setShowAdvanced(prev => !prev)}
               className="text-blue-600 hover:underline"
             >
-              {showAdvanced ? '隐藏高级配置' : '显示高级配置'}
+              {showAdvanced ? t('hide_advanced') : t('show_advanced')}
             </button>
           </div>
           {showAdvanced && (
             <div className="space-y-4 bg-gray-50 p-4 rounded-md border border-gray-200">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm text-gray-700">Proof Model</label>
+                  <label className="block text-sm text-gray-700">{t('proof_model')}</label>
                   <input
                     value={proofModel}
                     onChange={e => setProofModel(e.target.value)}
@@ -164,7 +168,7 @@ export default function NewProjectPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-700">Eval Model</label>
+                  <label className="block text-sm text-gray-700">{t('eval_model')}</label>
                   <input
                     value={evalModel}
                     onChange={e => setEvalModel(e.target.value)}
@@ -172,7 +176,7 @@ export default function NewProjectPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-700">Reform Model</label>
+                  <label className="block text-sm text-gray-700">{t('reform_model')}</label>
                   <input
                     value={reformModel}
                     onChange={e => setReformModel(e.target.value)}
@@ -180,7 +184,20 @@ export default function NewProjectPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-700">Steps (1–40)</label>
+                  <label className="block text-sm text-gray-700">{t('reasoning_effort')}</label>
+                  <select
+                    value={reasoningEffort}
+                    onChange={e => setReasoningEffort(e.target.value as 'minimal'|'low'|'medium'|'high')}
+                    className="w-full border rounded p-1 bg-gray-50 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="minimal">minimal</option>
+                    <option value="low">low</option>
+                    <option value="medium">medium</option>
+                    <option value="high">high</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-700">{t('steps_label')}</label>
                   <input
                     type="number"
                     value={steps}
@@ -190,7 +207,7 @@ export default function NewProjectPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-700">Reviews (1–6)</label>
+                  <label className="block text-sm text-gray-700">{t('reviews_label')}</label>
                   <input
                     type="number"
                     value={reviews}
@@ -200,7 +217,7 @@ export default function NewProjectPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-700">Iterations (1–10)</label>
+                  <label className="block text-sm text-gray-700">{t('iterations_label')}</label>
                   <input
                     type="number"
                     value={iterations}
@@ -213,11 +230,11 @@ export default function NewProjectPage() {
               <div className="flex items-center text-gray-700 space-x-4">
                 <label className="flex items-center space-x-2">
                   <input type="checkbox" checked={reformat} onChange={e => setReformat(e.target.checked)} />
-                  <span className="text-sm">Reformat conjectures</span>
+                  <span className="text-sm">{t('reformat_conjectures')}</span>
                 </label>
                 <label className="flex items-center text-gray-700 space-x-2">
                   <input type="checkbox" checked={theoremGraph} onChange={e => setTheoremGraph(e.target.checked)} />
-                  <span className="text-sm">Theorem graph mode</span>
+                  <span className="text-sm">{t('theorem_graph_mode')}</span>
                 </label>
               </div>
             </div>
@@ -226,7 +243,7 @@ export default function NewProjectPage() {
                 <button
                   type="submit"
                   className="w-full bg-gradient-to-r from-blue-600 to-indigo-700 text-white py-3 rounded-lg font-medium hover:opacity-90 transition"
-                >创建项目</button>
+                >{t('create_project')}</button>
               </div>
         </form>
           </div>

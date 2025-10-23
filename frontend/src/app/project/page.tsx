@@ -12,6 +12,7 @@ import CopyableBlock from '@/components/CopyableBlock';
 import Lemma from '@/interfaces/Lemma';
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import { useI18n } from '@/context/LanguageContext';
 // base URL of backend API (set via NEXT_PUBLIC_API_BASE_URL in .env.local)
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 // Format ISO date to localized date string (e.g. "2023/10/19")
@@ -83,6 +84,7 @@ interface ProjectConfig {
   proof_model: string;
   eval_model: string;
   reform_model: string;
+  reasoning_effort?: 'minimal'|'low'|'medium'|'high';
   steps: number;
   reviews: number;
   iterations: number;
@@ -90,6 +92,7 @@ interface ProjectConfig {
   theorem_graph_mode: boolean;
 }
 const ProjectDetailContent: React.FC = () => {
+  const { t } = useI18n();
   // read projectId from query string
   const searchParams = useSearchParams();
   const projectId = searchParams.get('projectId');
@@ -196,8 +199,8 @@ const ProjectDetailContent: React.FC = () => {
 
 
   const filteredLemmas = lemmas.filter(l => (l.title.includes(filter) || l.statement.includes(filter)) && !l.title.includes("context"));
-  if (!token) return <p className="text-center mt-8">请先登录</p>;
-  if (loading || !project) return <p className="text-center mt-8">加载中...</p>;
+  if (!token) return <p className="text-center mt-8">{t('please_login')}</p>;
+  if (loading || !project) return <p className="text-center mt-8">{t('project_loading')}</p>;
   return (
     <div className="flex flex-col min-h-screen bg-gray-50">
       <NavBar />
@@ -206,7 +209,7 @@ const ProjectDetailContent: React.FC = () => {
         <div className="bg-white rounded-2xl shadow p-6 mb-6 relative">
           <h1 className="text-2xl font-bold text-gray-800">{project.title}</h1>
           {/* Creator at top-right */}
-          <div className="absolute top-4 right-6 text-sm text-gray-500">创建者：{project.creator}</div>
+          <div className="absolute top-4 right-6 text-sm text-gray-500">{t('creator')}{project.creator}</div>
           <CopyableBlock text={project.problem}>
             <div className="mt-2 text-gray-600 prose">
               {renderDescription(project.problem)}
@@ -215,7 +218,7 @@ const ProjectDetailContent: React.FC = () => {
           {project.context && (
             <div className="mt-4 p-4 bg-gray-50 border-l-4 border-blue-500">
               <CopyableBlock text={project.context}>
-                <h3 className="font-semibold mb-2">Context</h3>
+                <h3 className="font-semibold mb-2">{t('context_label')}</h3>
                 <div className="text-gray-700 prose">
                   {renderDescription(project.context)}
                 </div>
@@ -225,7 +228,7 @@ const ProjectDetailContent: React.FC = () => {
           <div className="mt-3 flex items-center space-x-4">
             <div className="text-sm text-gray-500 flex items-center">
               <FaInfoCircle className="mr-1" />
-              <span>创建于 {formatDate(project.created_at)} · 最后活跃 {timeAgo(project.last_active)}</span>
+              <span>{t('created_last_active', { date: formatDate(project.created_at), ago: timeAgo(project.last_active) })}</span>
             </div>
             <span className={`px-2 py-1 rounded-full text-xs font-medium uppercase ${statusClass(project.status)}`}>{project.status}</span>
           </div>
@@ -234,13 +237,13 @@ const ProjectDetailContent: React.FC = () => {
             <button
               className="px-3 py-1 bg-gray-100 text-gray-800 rounded hover:bg-gray-200 text-sm"
               onClick={() => setShowConfig(prev => !prev)}
-            >{showConfig ? '隐藏设置' : '查看设置'}</button>
+            >{showConfig ? t('hide_settings') : t('view_settings')}</button>
           </div>
         </div>
         {/* 配置面板，与新建项目一致样式，仅读 */}
         {showConfig && configObj && (
           <div className="space-y-4 bg-gray-50 p-4 rounded-md border border-gray-200 mb-6">
-            <h3 className="font-semibold">项目设置</h3>
+            <h3 className="font-semibold">{t('project_settings')}</h3>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm text-gray-700">Proof Model</label>
@@ -262,6 +265,14 @@ const ProjectDetailContent: React.FC = () => {
                 <label className="block text-sm text-gray-700">Reform Model</label>
                 <input
                   value={configObj.reform_model}
+                  readOnly
+                  className="w-full border rounded p-1 bg-gray-50 text-gray-700"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-700">Reasoning Effort</label>
+                <input
+                  value={configObj.reasoning_effort ?? 'medium'}
                   readOnly
                   className="w-full border rounded p-1 bg-gray-50 text-gray-700"
                 />
@@ -308,7 +319,7 @@ const ProjectDetailContent: React.FC = () => {
             {/* 左侧：列表区 */}
             <div className="flex flex-col lg:w-1/3 bg-white rounded-2xl shadow lg:sticky lg:top-4 lg:h-[calc(100vh-10rem)]">
               <div className="flex items-center justify-between px-6 py-4 border-b">
-                <h2 className="text-lg font-semibold text-gray-800">引理列表 ({filteredLemmas.length})</h2>
+                <h2 className="text-lg font-semibold text-gray-800">{t('lemma_list', { count: filteredLemmas.length })}</h2>
             {/* Lemma creation/edit buttons are not required; removed */}
               </div>
               <div className="px-6 py-3 border-b">
@@ -318,7 +329,7 @@ const ProjectDetailContent: React.FC = () => {
                     value={filter}
                     onChange={e => setFilter(e.target.value)}
                     className="block w-full pl-10 pr-3 py-2 text-gray-900 bg-gray-100 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="搜索引理..."
+                    placeholder={t('search_lemmas')}
                   />
                   <FaSearch className="absolute top-1/2 transform -translate-y-1/2 left-3 text-gray-400" />
                 </div>
@@ -334,7 +345,7 @@ const ProjectDetailContent: React.FC = () => {
             {/* 右侧：详情区 */}
             <div className="flex-1 bg-white rounded-2xl shadow flex flex-col">
               <div className="px-6 py-4 border-b">
-                <h2 className="text-lg font-semibold text-gray-800">引理详情</h2>
+                <h2 className="text-lg font-semibold text-gray-800">{t('lemma_detail')}</h2>
               </div>
               <div className="p-6 flex-1 overflow-y-auto">
                 {selectedLemma ? (
@@ -345,9 +356,9 @@ const ProjectDetailContent: React.FC = () => {
                         <div className="bg-blue-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-6">
                           <FaInfoCircle className="text-blue-600 text-2xl" />
                         </div>
-                        <h3 className="text-xl font-semibold text-gray-800 mb-2">选择引理查看详情</h3>
+                        <h3 className="text-xl font-semibold text-gray-800 mb-2">{t('select_lemma_title')}</h3>
                         <p className="text-gray-600">
-                          请从左侧列表中选择一个引理以查看其详细表述、证明及相关信息
+                          {t('select_lemma_text')}
                         </p>
                       </div>
                     </div>
@@ -357,7 +368,7 @@ const ProjectDetailContent: React.FC = () => {
           </div>
         {/* Project notes / comments */}
         <div className="bg-white rounded-2xl shadow p-6 mt-6 mb-6 space-y-4">
-          <h2 className="text-lg font-semibold mb-2">Notes or Comments</h2>
+          <h2 className="text-lg font-semibold mb-2">{t('notes_comments')}</h2>
           <textarea
             className="w-full border rounded p-2 h-32 resize-none"
             value={comment}
@@ -367,10 +378,10 @@ const ProjectDetailContent: React.FC = () => {
           <div className="mt-2 flex items-center justify-end space-x-4">
             {/* Status message */}
             {saveStatus === 'success' && (
-              <span className="text-green-600">Saved!</span>
+              <span className="text-green-600">{t('saved')}</span>
             )}
             {saveStatus === 'error' && (
-              <span className="text-red-600">Failed to save</span>
+              <span className="text-red-600">{t('failed_to_save')}</span>
             )}
             <button
               className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
@@ -395,7 +406,7 @@ const ProjectDetailContent: React.FC = () => {
                 }
               }}
             >
-              Save
+              {t('save')}
             </button>
           </div>
         </div>
