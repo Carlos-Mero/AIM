@@ -1,14 +1,14 @@
-use log::{info, debug, warn, error};
-use tokio::task::JoinSet;
 use futures_util::StreamExt;
+use log::{debug, error, info, warn};
 use serde_json::json;
+use tokio::task::JoinSet;
 
-use serde::{Serialize, Deserialize};
-use indicatif::{ProgressBar, ProgressStyle};
 use crate::utils::find_box;
-use std::sync::Arc;
 use dotenvy::dotenv;
+use indicatif::{ProgressBar, ProgressStyle};
+use serde::{Deserialize, Serialize};
 use std::env;
+use std::sync::Arc;
 use std::time::Duration;
 
 // const CONNECT_TIMEOUT: Duration = Duration::from_secs(6000);
@@ -95,19 +95,25 @@ impl MemoryBlock {
         self.updated_at = Utc::now();
         self
     }
-    pub fn is_solved(&self) -> bool {self.solved}
+    pub fn is_solved(&self) -> bool {
+        self.solved
+    }
     pub fn set_solved(&mut self, solved: bool) -> &Self {
         self.solved = solved;
         self.updated_at = Utc::now();
         self
     }
-    pub fn get_reviews(&self) -> u8 {self.reviews}
+    pub fn get_reviews(&self) -> u8 {
+        self.reviews
+    }
     pub fn set_reviews(&mut self, reviews: u8) -> &Self {
         self.reviews = reviews;
         self.updated_at = Utc::now();
         self
     }
-    pub fn get_comment(&self) -> &str {&self.comment}
+    pub fn get_comment(&self) -> &str {
+        &self.comment
+    }
     pub fn set_comment(&mut self, comment: impl Into<String>) -> &Self {
         self.comment = comment.into();
         self.updated_at = Utc::now();
@@ -115,25 +121,35 @@ impl MemoryBlock {
     }
 
     pub fn _format(&self) -> String {
-        format!("\\begin{{{0}}}\n{1}\n\n**DEPENDENCY**: {2:?}\n\\end{{{0}}}", &self.memtype, &self.content, &self.deps)
+        format!(
+            "\\begin{{{0}}}\n{1}\n\n**DEPENDENCY**: {2:?}\n\\end{{{0}}}",
+            &self.memtype, &self.content, &self.deps
+        )
     }
     pub fn _format_with_proof(&self) -> String {
-        let proof_content = if self.proof.is_empty() {String::new()} else {
+        let proof_content = if self.proof.is_empty() {
+            String::new()
+        } else {
             format!("\n\\begin{{proof}}\n{0}\n\\end{{proof}}", &self.proof)
         };
-        format!("\\begin{{{0}}}\n{1}\n\n**DEPENDENCY**: {2:?}\n\\end{{{0}}}{3}", &self.memtype, &self.content, &self.deps, &proof_content)
+        format!(
+            "\\begin{{{0}}}\n{1}\n\n**DEPENDENCY**: {2:?}\n\\end{{{0}}}{3}",
+            &self.memtype, &self.content, &self.deps, &proof_content
+        )
     }
 
     pub fn _format_with_proof_summary(&self) -> String {
-        let ps_content = if self.proof_summary.is_empty() {String::new()} else {
-            format!("\n<proof_summary>\n{}\n</proof_summary>", &self.proof_summary)
+        let ps_content = if self.proof_summary.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "\n<proof_summary>\n{}\n</proof_summary>",
+                &self.proof_summary
+            )
         };
         format!(
             "\\begin{{{0}}}\n{1}\n\n**DEPENDENCY**: {2:?}\n\\end{{{0}}}\n\n**Proof Sketch**{3}",
-            &self.memtype,
-            &self.content,
-            &self.deps,
-            &ps_content
+            &self.memtype, &self.content, &self.deps, &ps_content
         )
     }
 }
@@ -164,7 +180,9 @@ impl Memory {
             }
 
             retrieve_id += 1;
-            if retrieve_id >= dep_ids.len() {break;}
+            if retrieve_id >= dep_ids.len() {
+                break;
+            }
         }
         if !include_end_node {
             dep_ids.remove(0);
@@ -181,22 +199,27 @@ impl Memory {
         return dep_ids;
     }
 
-//    pub fn get_subgraph_ids(&self, id: usize) -> Vec<usize> {
-//        // Get all the memory ids derived from the given id
-//        let mut dev_ids: Vec<usize> = vec![id];
-//        for i in id+1 .. self.memory.len() {
-//            let memblock = &self.memory[i];
-//            for dep_id in &memblock.deps {
-//                if dev_ids.contains(dep_id) && !dev_ids.contains(&i) {
-//                    dev_ids.push(i);
-//                    break;
-//                }
-//            }
-//        }
-//        return dev_ids;
-//    }
+    //    pub fn get_subgraph_ids(&self, id: usize) -> Vec<usize> {
+    //        // Get all the memory ids derived from the given id
+    //        let mut dev_ids: Vec<usize> = vec![id];
+    //        for i in id+1 .. self.memory.len() {
+    //            let memblock = &self.memory[i];
+    //            for dep_id in &memblock.deps {
+    //                if dev_ids.contains(dep_id) && !dev_ids.contains(&i) {
+    //                    dev_ids.push(i);
+    //                    break;
+    //                }
+    //            }
+    //        }
+    //        return dev_ids;
+    //    }
 
-    pub fn format_deps(&self, id: usize, with_proof: bool, include_end_node: bool) -> Option<String> {
+    pub fn format_deps(
+        &self,
+        id: usize,
+        with_proof: bool,
+        include_end_node: bool,
+    ) -> Option<String> {
         let mut dep_ids = self.get_proof_path_ids(id, include_end_node);
         let mut res = String::new();
         // add the context information in memory id: 0 if exists
@@ -208,13 +231,19 @@ impl Memory {
 
         for id in dep_ids.iter().rev() {
             if let Some(memblock) = &self.memory.get(*id) {
-                res.push_str(&format!("#### Memory **ID: {}**\n\n{}\n\n",
+                res.push_str(&format!(
+                    "#### Memory **ID: {}**\n\n{}\n\n",
                     id,
-                    if with_proof {memblock._format_with_proof()} else {memblock._format()}));
+                    if with_proof {
+                        memblock._format_with_proof()
+                    } else {
+                        memblock._format()
+                    }
+                ));
             }
         }
 
-        if res.is_empty() {None} else {Some(res)}
+        if res.is_empty() { None } else { Some(res) }
     }
     // pub fn format_all(&self, solved_only: bool) -> Option<String> {
     //     // Format all memory blocks as the input of other agents
@@ -240,8 +269,13 @@ impl Memory {
                 self.memory
                     .iter()
                     .enumerate()
-                    .filter(|(_, mem)| if solved_only {mem.is_solved()} else {true})
-                    .map(|(i, mem)| format!("#### Memory **ID: {i}**\n\n{}\n\n", mem._format_with_proof()))
+                    .filter(|(_, mem)| if solved_only { mem.is_solved() } else { true })
+                    .map(|(i, mem)| {
+                        format!(
+                            "#### Memory **ID: {i}**\n\n{}\n\n",
+                            mem._format_with_proof()
+                        )
+                    })
                     .collect::<String>(),
             )
         }
@@ -256,8 +290,13 @@ impl Memory {
                 self.memory
                     .iter()
                     .enumerate()
-                    .filter(|(_, mem)| if solved_only {mem.is_solved()} else {true})
-                    .map(|(i, mem)| format!("#### Memory **ID: {i}**\n\n{}\n\n", mem._format_with_proof_summary()))
+                    .filter(|(_, mem)| if solved_only { mem.is_solved() } else { true })
+                    .map(|(i, mem)| {
+                        format!(
+                            "#### Memory **ID: {i}**\n\n{}\n\n",
+                            mem._format_with_proof_summary()
+                        )
+                    })
                     .collect::<String>(),
             )
         }
@@ -268,12 +307,12 @@ impl Memory {
 pub struct LMClient {
     client: reqwest::Client,
     api_key: String,
-    base_url: String
+    base_url: String,
 }
 
 impl LMClient {
     pub fn new() -> Self {
-        if let Err(e) =  dotenv() {
+        if let Err(e) = dotenv() {
             error!("Error occured when loading .env file: {}", e);
             panic!();
         }
@@ -284,17 +323,28 @@ impl LMClient {
                 panic!();
             }
         };
-        let base_url = env::var("OPENAI_API_BASEURL").unwrap_or_else(|_| 
-            "https://api.openai.com".into());
+        let base_url =
+            env::var("OPENAI_API_BASEURL").unwrap_or_else(|_| "https://api.openai.com".into());
 
         let client = reqwest::Client::builder()
             // .connect_timeout(CONNECT_TIMEOUT)
             // .timeout(REQUEST_TIMEOUT)
-            .build().unwrap();
-        LMClient { client: client, api_key: api_key, base_url: base_url.into() }
+            .build()
+            .unwrap();
+        LMClient {
+            client: client,
+            api_key: api_key,
+            base_url: base_url.into(),
+        }
     }
 
-    async fn comp(&self, prompt: &str, model: &str, stream_output: bool, reasoning_effort: &str) -> Result<String, Box<dyn std::error::Error>> {
+    async fn comp(
+        &self,
+        prompt: &str,
+        model: &str,
+        stream_output: bool,
+        reasoning_effort: &str,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         // Always send stream=true since SSE client expects event stream
         // Always include reasoning_effort; non-supporting models ignore it.
         let request_body = json!({
@@ -306,21 +356,28 @@ impl LMClient {
             "stream": true,
             "reasoning_effort": reasoning_effort
         });
-        let url = format!("{}/v1/chat/completions", &self.base_url.trim_end_matches('/').trim_end_matches("/v1"));
+        let url = format!(
+            "{}/v1/chat/completions",
+            &self.base_url.trim_end_matches('/').trim_end_matches("/v1")
+        );
 
         let mut attempt: u8 = 0;
 
         loop {
-            debug!("Sending request to url {}, Attempt {}:\n{:#?}", &url, attempt, &request_body);
+            debug!(
+                "Sending request to url {}, Attempt {}:\n{:#?}",
+                &url, attempt, &request_body
+            );
             attempt += 1;
 
-            let response = self.client
+            let response = self
+                .client
                 .post(&url)
                 .bearer_auth(&self.api_key)
                 .header(reqwest::header::ACCEPT, "text/event-stream")
                 .json(&request_body)
                 .send()
-            .await;
+                .await;
 
             match response {
                 Ok(resp) if resp.status().is_success() => {
@@ -357,11 +414,20 @@ impl LMClient {
 
                                 match serde_json::from_str::<serde_json::Value>(data_str) {
                                     Ok(data) => {
-                                        if let Some(content) = data["choices"][0]["delta"]["reasoning_content"].as_str() {
-                                            if stream_output {print!("{}", &content)}
+                                        if let Some(content) =
+                                            data["choices"][0]["delta"]["reasoning_content"]
+                                                .as_str()
+                                        {
+                                            if stream_output {
+                                                print!("{}", &content)
+                                            }
                                         }
-                                        if let Some(content) = data["choices"][0]["delta"]["content"].as_str() {
-                                            if stream_output {print!("{}", &content)}
+                                        if let Some(content) =
+                                            data["choices"][0]["delta"]["content"].as_str()
+                                        {
+                                            if stream_output {
+                                                print!("{}", &content)
+                                            }
                                             content_buffer.push_str(content);
                                         }
                                     }
@@ -400,7 +466,7 @@ impl LMClient {
 
 #[async_trait::async_trait]
 pub trait Agent: Send {
-    async fn _process(&self) -> Result<String, Box<dyn std::error::Error>>;
+    async fn _process(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
 }
 
 pub struct Explorer {
@@ -414,47 +480,79 @@ pub struct Explorer {
 
 impl Explorer {
     pub fn new() -> Self {
-        Explorer { client: LMClient::new(), model: String::new(), problem: String::new(), streaming: false, context: None, reasoning_effort: "medium".into() }
+        Explorer {
+            client: LMClient::new(),
+            model: String::new(),
+            problem: String::new(),
+            streaming: false,
+            context: None,
+            reasoning_effort: "medium".into(),
+        }
     }
-    pub fn model(mut self, model: impl Into<String>) -> Self {self.model = model.into(); self}
-    pub fn streaming(mut self, streaming: bool) -> Self {self.streaming = streaming; self}
-    pub fn set_problem(&mut self, problem: impl Into<String>) -> &Self {self.problem = problem.into(); self}
-    pub fn set_context(&mut self, context: impl Into<String>) -> &Self {self.context = Some(context.into()); self}
-    pub fn reasoning_effort(mut self, effort: impl Into<String>) -> Self {self.reasoning_effort = effort.into(); self}
+    pub fn model(mut self, model: impl Into<String>) -> Self {
+        self.model = model.into();
+        self
+    }
+    pub fn streaming(mut self, streaming: bool) -> Self {
+        self.streaming = streaming;
+        self
+    }
+    pub fn set_problem(&mut self, problem: impl Into<String>) -> &Self {
+        self.problem = problem.into();
+        self
+    }
+    pub fn set_context(&mut self, context: impl Into<String>) -> &Self {
+        self.context = Some(context.into());
+        self
+    }
+    pub fn reasoning_effort(mut self, effort: impl Into<String>) -> Self {
+        self.reasoning_effort = effort.into();
+        self
+    }
 }
 
 #[async_trait::async_trait]
 impl Agent for Explorer {
-    async fn _process(&self) -> Result<String, Box<dyn std::error::Error>> {
+    async fn _process(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let problem_stat = format!("\\begin{{problem}}{}\\end{{problem}}", &self.problem);
         let mut context_prefix = String::new();
         if let Some(context) = &self.context {
-            context_prefix = format!("\n\nHere is a list of context that we have collected for this problem or our history findings during exploration. They can be accepted without controversy as correct, and you can begin your exploration based on them.\n\n### Context and History Explorations\n\n{}", context);
+            context_prefix = format!(
+                "\n\nHere is a list of context that we have collected for this problem or our history findings during exploration. They can be accepted without controversy as correct, and you can begin your exploration based on them.\n\n### Context and History Explorations\n\n{}",
+                context
+            );
         }
-        let prompt = concat!("### Instruction\n",
+        let prompt = (concat!(
+            "### Instruction\n",
             "\n",
             "You are an expert that is knowledgeable across all domains in math. This time you are asked to help with our frontier math research. Its statement is as follows:\n",
-            "\n").to_string() + 
-        &problem_stat + 
-        concat!("\n",
-            "This problem could be difficult and not able to be directly solved, but you can make your contribution with the following instructions:\n",
-            "\n",
-            "1. You are required to explore different approaches or directions that might help with our final goal, and write down one interesting finding in your explorations as a new conjecture in your response. DO NOT claim that you can not do this job.\n",
-            "2. Your conjecture must contain the complete definitions required within it, such that it is able to stand alone as an independent lemma, unless it is declared in memory. It should be a novel conjecture that marks concrete achievements and is not similar to any existing lemmas.\n",
-            "3. You should wrap your finding inside a latex environment: \\begin{conjecture}\\end{conjecture}. This conjecture should be equipped with a detailed, complete and rigorous proof. You should explicitly write down every intermediate derivation step in the proof. The corresponding proof should be wrapped in \\begin{proof}\\end{proof} directly followed by the conjecture.\n",
-            "4. After these components you should also provide the dependency of this conjecture. You need to write down the memory IDs of lemmas used in this conjecture in a JSON array format, and warp them inside \\begin{dependency}\\end{dependency}. For example, a dependency of a new conjecture could be \\begin{dependency}[0, 3, 4]\\end{dependency}. You can use an empty array \"[]\" when this conjecture does not depend on other lemmas.\n",
-            "\n",
-            "More accurately, your response should obey the following format:\n",
-            "\n",
-            "\\begin{conjecture}Your new findings here\\end{conjecture}\n",
-            "\\begin{proof}Your proof of the conjecture above\\end{proof}\n",
-            "\\begin{dependency}An json array of related memory IDs of this conjecture\\end{dependency}",
-            "\n",
-            "Moreover, when you think the time is right that you are able to prove the original problem, you can simply state your proof inside \\begin{final_proof}\\end{final_proof}, and explicitly write down its dependency in \\begin{dependency}\\end{dependency}. In this case, you do not need to propose any new conjectures for this problem."
+            "\n"
         )
-        + &context_prefix;
+        .to_string()
+            + &problem_stat
+            + concat!(
+                "\n",
+                "This problem could be difficult and not able to be directly solved, but you can make your contribution with the following instructions:\n",
+                "\n",
+                "1. You are required to explore different approaches or directions that might help with our final goal, and write down one interesting finding in your explorations as a new conjecture in your response. DO NOT claim that you can not do this job.\n",
+                "2. Your conjecture must contain the complete definitions required within it, such that it is able to stand alone as an independent lemma, unless it is declared in memory. It should be a novel conjecture that marks concrete achievements and is not similar to any existing lemmas.\n",
+                "3. You should wrap your finding inside a latex environment: \\begin{conjecture}\\end{conjecture}. This conjecture should be equipped with a detailed, complete and rigorous proof. You should explicitly write down every intermediate derivation step in the proof. The corresponding proof should be wrapped in \\begin{proof}\\end{proof} directly followed by the conjecture.\n",
+                "4. After these components you should also provide the dependency of this conjecture. You need to write down the memory IDs of lemmas used in this conjecture in a JSON array format, and warp them inside \\begin{dependency}\\end{dependency}. For example, a dependency of a new conjecture could be \\begin{dependency}[0, 3, 4]\\end{dependency}. You can use an empty array \"[]\" when this conjecture does not depend on other lemmas.\n",
+                "\n",
+                "More accurately, your response should obey the following format:\n",
+                "\n",
+                "\\begin{conjecture}Your new findings here\\end{conjecture}\n",
+                "\\begin{proof}Your proof of the conjecture above\\end{proof}\n",
+                "\\begin{dependency}An json array of related memory IDs of this conjecture\\end{dependency}",
+                "\n",
+                "Moreover, when you think the time is right that you are able to prove the original problem, you can simply state your proof inside \\begin{final_proof}\\end{final_proof}, and explicitly write down its dependency in \\begin{dependency}\\end{dependency}. In this case, you do not need to propose any new conjectures for this problem."
+            ))
+            + &context_prefix;
 
-        return self.client.comp(&prompt, &self.model, self.streaming, &self.reasoning_effort).await;
+        return self
+            .client
+            .comp(&prompt, &self.model, self.streaming, &self.reasoning_effort)
+            .await;
     }
 }
 
@@ -472,15 +570,45 @@ pub struct Reviewer {
 
 impl Reviewer {
     pub fn new() -> Self {
-        Reviewer {client: LMClient::new(), model: String::new(), conjecture: String::new(), proof: String::new(), reviews: 0, streaming: false, context: None, reasoning_effort: "medium".into()}
+        Reviewer {
+            client: LMClient::new(),
+            model: String::new(),
+            conjecture: String::new(),
+            proof: String::new(),
+            reviews: 0,
+            streaming: false,
+            context: None,
+            reasoning_effort: "medium".into(),
+        }
     }
-    pub fn model(mut self, model: impl Into<String>) -> Self {self.model = model.into(); self}
-    pub fn reviews(mut self, reviews: u8) -> Self {self.reviews = reviews; self}
-    pub fn streaming(mut self, streaming: bool) -> Self {self.streaming = streaming; self}
-    pub fn set_conjecture(&mut self, conjecture: impl Into<String>) -> &Self {self.conjecture = conjecture.into(); self}
-    pub fn set_proof(&mut self, proof: impl Into<String>) -> &Self {self.proof = proof.into(); self}
-    pub fn set_context(&mut self, context: impl Into<String>) -> &Self {self.context = Some(context.into()); self}
-    pub fn reasoning_effort(mut self, effort: impl Into<String>) -> Self {self.reasoning_effort = effort.into(); self}
+    pub fn model(mut self, model: impl Into<String>) -> Self {
+        self.model = model.into();
+        self
+    }
+    pub fn reviews(mut self, reviews: u8) -> Self {
+        self.reviews = reviews;
+        self
+    }
+    pub fn streaming(mut self, streaming: bool) -> Self {
+        self.streaming = streaming;
+        self
+    }
+    pub fn set_conjecture(&mut self, conjecture: impl Into<String>) -> &Self {
+        self.conjecture = conjecture.into();
+        self
+    }
+    pub fn set_proof(&mut self, proof: impl Into<String>) -> &Self {
+        self.proof = proof.into();
+        self
+    }
+    pub fn set_context(&mut self, context: impl Into<String>) -> &Self {
+        self.context = Some(context.into());
+        self
+    }
+    pub fn reasoning_effort(mut self, effort: impl Into<String>) -> Self {
+        self.reasoning_effort = effort.into();
+        self
+    }
 
     pub async fn pverify(self: Arc<Self>) -> Option<String> {
         // pessimistic verification for the given conjecture and proof
@@ -489,10 +617,12 @@ impl Reviewer {
         info!("Starting pverify with **{}** reviewers.", self.reviews);
         let pb = ProgressBar::new(self.reviews as u64);
         if let Ok(style) = ProgressStyle::with_template(
-            "{msg} [{elapsed_precise}] {wide_bar} {pos}/{len} (eta: {eta})"
+            "{msg} [{elapsed_precise}] {wide_bar} {pos}/{len} (eta: {eta})",
         ) {
             pb.set_style(style);
-        } else {warn!("Incorrect style template for progressbar.");}
+        } else {
+            warn!("Incorrect style template for progressbar.");
+        }
         pb.set_message("pverifying");
 
         let mut tasks: JoinSet<Option<String>> = JoinSet::new();
@@ -502,7 +632,10 @@ impl Reviewer {
             tasks.spawn(async move {
                 let res = match n_reviewer._process().await {
                     Ok(s) => Some(s),
-                    Err(e) => {error!("Error Occured when reviewing: {}", e); None}
+                    Err(e) => {
+                        error!("Error Occured when reviewing: {}", e);
+                        None
+                    }
                 };
                 n_pb.inc(1);
                 res
@@ -527,11 +660,17 @@ impl Reviewer {
 
 #[async_trait::async_trait]
 impl Agent for Reviewer {
-    async fn _process(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let conjecture_proof = format!("### Conjecture\n\n{}\n\n### Proof\n\n{}", &self.conjecture, &self.proof);
+    async fn _process(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let conjecture_proof = format!(
+            "### Conjecture\n\n{}\n\n### Proof\n\n{}",
+            &self.conjecture, &self.proof
+        );
         let mut context_prefix = String::new();
         if let Some(context) = &self.context {
-            context_prefix = format!("\n\n### Context and History Explorations\n\nHere is a list of context that we have collected for this problem or our history findings during exploration. They serve as the background of the conjecture and proof and can be accepted without controversy as correct.\n\n{}", context);
+            context_prefix = format!(
+                "\n\n### Context and History Explorations\n\nHere is a list of context that we have collected for this problem or our history findings during exploration. They serve as the background of the conjecture and proof and can be accepted without controversy as correct.\n\n{}",
+                context
+            );
         }
         let prompt = concat!(
              "### Instruction\n",
@@ -546,7 +685,10 @@ impl Agent for Reviewer {
              "\n",
              "Please state your verification result inside $\\boxed{}$ as $\\boxed{valid}$ or $\\boxed{invalid}$. You also need to include the rationale on your decision in your response.\n",
              "\n").to_string() + &conjecture_proof + &context_prefix;
-        return self.client.comp(&prompt, &self.model, self.streaming, &self.reasoning_effort).await;
+        return self
+            .client
+            .comp(&prompt, &self.model, self.streaming, &self.reasoning_effort)
+            .await;
     }
 }
 
@@ -563,24 +705,60 @@ pub struct Refiner {
 
 impl Refiner {
     pub fn new() -> Self {
-        Refiner { client: LMClient::new(), model: String::new(), conjecture: String::new(), proof: String::new(), review: String::new(), streaming: false, context: None, reasoning_effort: "medium".into() }
+        Refiner {
+            client: LMClient::new(),
+            model: String::new(),
+            conjecture: String::new(),
+            proof: String::new(),
+            review: String::new(),
+            streaming: false,
+            context: None,
+            reasoning_effort: "medium".into(),
+        }
     }
-    pub fn model(mut self, model: impl Into<String>) -> Self {self.model = model.into(); self}
-    pub fn streaming(mut self, streaming: bool) -> Self {self.streaming = streaming; self}
-    pub fn set_conjecture(&mut self, conjecture: impl Into<String>) -> &Self {self.conjecture = conjecture.into(); self}
-    pub fn set_proof(&mut self, proof: impl Into<String>) -> &Self {self.proof = proof.into(); self}
-    pub fn set_review(&mut self, review: impl Into<String>) -> &Self {self.review = review.into(); self}
-    pub fn set_context(&mut self, context: impl Into<String>) -> &Self {self.context = Some(context.into()); self}
-    pub fn reasoning_effort(mut self, effort: impl Into<String>) -> Self {self.reasoning_effort = effort.into(); self}
+    pub fn model(mut self, model: impl Into<String>) -> Self {
+        self.model = model.into();
+        self
+    }
+    pub fn streaming(mut self, streaming: bool) -> Self {
+        self.streaming = streaming;
+        self
+    }
+    pub fn set_conjecture(&mut self, conjecture: impl Into<String>) -> &Self {
+        self.conjecture = conjecture.into();
+        self
+    }
+    pub fn set_proof(&mut self, proof: impl Into<String>) -> &Self {
+        self.proof = proof.into();
+        self
+    }
+    pub fn set_review(&mut self, review: impl Into<String>) -> &Self {
+        self.review = review.into();
+        self
+    }
+    pub fn set_context(&mut self, context: impl Into<String>) -> &Self {
+        self.context = Some(context.into());
+        self
+    }
+    pub fn reasoning_effort(mut self, effort: impl Into<String>) -> Self {
+        self.reasoning_effort = effort.into();
+        self
+    }
 }
 
 #[async_trait::async_trait]
 impl Agent for Refiner {
-    async fn _process(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let conjecture_proof_review = format!("### Conjecture\n\n{}\n\n### Proof\n\n{}\n\n### Review\n\n{}", &self.conjecture, &self.proof, &self.review);
+    async fn _process(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let conjecture_proof_review = format!(
+            "### Conjecture\n\n{}\n\n### Proof\n\n{}\n\n### Review\n\n{}",
+            &self.conjecture, &self.proof, &self.review
+        );
         let mut context_prefix = String::new();
         if let Some(context) = &self.context {
-            context_prefix = format!("\n\n### Context and History Explorations\n\nHere is a list of context that we have collected for this problem or our history findings during exploration. They serve as the background of the conjecture and proof, and can be accepted without controversy as correct.\n\n{}", context);
+            context_prefix = format!(
+                "\n\n### Context and History Explorations\n\nHere is a list of context that we have collected for this problem or our history findings during exploration. They serve as the background of the conjecture and proof, and can be accepted without controversy as correct.\n\n{}",
+                context
+            );
         }
         let prompt = concat!(
             "### Instruction\n",
@@ -591,7 +769,10 @@ impl Agent for Refiner {
             "2. And if you believe this conjecture itself is not true, please state the opposite of this conjecture inside \\begin{conjecture}\\end{conjecture}, and your rationales or proofs of this judgement inside \\begin{proof}\\end{proof}. Finally you should write down a \"\\boxed{false}\" at the end of your response.\n",
             "\n"
         ).to_string() + &conjecture_proof_review + &context_prefix;
-        return self.client.comp(&prompt, &self.model, self.streaming, &self.reasoning_effort).await;
+        return self
+            .client
+            .comp(&prompt, &self.model, self.streaming, &self.reasoning_effort)
+            .await;
     }
 }
 
@@ -603,15 +784,31 @@ pub struct Formatter {
 }
 
 impl Formatter {
-    pub fn new() -> Self {Formatter { client: LMClient::new(), model: String::new(), content: String::new(), reasoning_effort: "medium".into() }}
-    pub fn model(mut self, model: impl Into<String>) -> Self {self.model = model.into(); self}
-    pub fn content(mut self, content: impl Into<String>) -> Self {self.content = content.into(); self}
-    pub fn reasoning_effort(mut self, effort: impl Into<String>) -> Self {self.reasoning_effort = effort.into(); self}
+    pub fn new() -> Self {
+        Formatter {
+            client: LMClient::new(),
+            model: String::new(),
+            content: String::new(),
+            reasoning_effort: "medium".into(),
+        }
+    }
+    pub fn model(mut self, model: impl Into<String>) -> Self {
+        self.model = model.into();
+        self
+    }
+    pub fn content(mut self, content: impl Into<String>) -> Self {
+        self.content = content.into();
+        self
+    }
+    pub fn reasoning_effort(mut self, effort: impl Into<String>) -> Self {
+        self.reasoning_effort = effort.into();
+        self
+    }
 }
 
 #[async_trait::async_trait]
 impl Agent for Formatter {
-    async fn _process(&self) -> Result<String, Box<dyn std::error::Error>> {
+    async fn _process(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let prompt = concat!(
             "Please help me rewrite these math related contents into standard markdown format for preview. You should obey the following instructions when completing this task:\n",
             "\n",
@@ -622,7 +819,10 @@ impl Agent for Formatter {
             "\n",
             "Here is the original contents:\n",
             "\n").to_string() + &format!("\\begin{{contents}}{}\\end{{contents}}", self.content);
-        return self.client.comp(&prompt, &self.model, false, &self.reasoning_effort).await;
+        return self
+            .client
+            .comp(&prompt, &self.model, false, &self.reasoning_effort)
+            .await;
     }
 }
 
@@ -635,16 +835,36 @@ pub struct ProofSummarizer {
 }
 
 impl ProofSummarizer {
-    pub fn new() -> Self {ProofSummarizer { client: LMClient::new(), model: String::new(), conjecture: String::new(), proof: String::new(), reasoning_effort: "medium".into() }}
-    pub fn model(mut self, model: impl Into<String>) -> Self {self.model = model.into(); self}
-    pub fn conjecture(mut self, conjecture: impl Into<String>) -> Self {self.conjecture = conjecture.into(); self}
-    pub fn proof(mut self, proof: impl Into<String>) -> Self {self.proof = proof.into(); self}
-    pub fn reasoning_effort(mut self, effort: impl Into<String>) -> Self {self.reasoning_effort = effort.into(); self}
+    pub fn new() -> Self {
+        ProofSummarizer {
+            client: LMClient::new(),
+            model: String::new(),
+            conjecture: String::new(),
+            proof: String::new(),
+            reasoning_effort: "medium".into(),
+        }
+    }
+    pub fn model(mut self, model: impl Into<String>) -> Self {
+        self.model = model.into();
+        self
+    }
+    pub fn conjecture(mut self, conjecture: impl Into<String>) -> Self {
+        self.conjecture = conjecture.into();
+        self
+    }
+    pub fn proof(mut self, proof: impl Into<String>) -> Self {
+        self.proof = proof.into();
+        self
+    }
+    pub fn reasoning_effort(mut self, effort: impl Into<String>) -> Self {
+        self.reasoning_effort = effort.into();
+        self
+    }
 }
 
 #[async_trait::async_trait]
 impl Agent for ProofSummarizer {
-    async fn _process(&self) -> Result<String, Box<dyn std::error::Error>> {
+    async fn _process(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let prompt = concat!(
             "You will be given a mathematical conjecture and its proof.\n",
             "Your task is to carefully read and understand the proof, then produce a clear and concise summary that includes:\n",
@@ -662,6 +882,9 @@ impl Agent for ProofSummarizer {
             "```\n",
             "Ensure that the summary is self-contained and understandable without referencing the original text.\n",
             "\n").to_string() + &format!("\\begin{{conjecture}}{}\\end{{conjecture}}\n\\begin{{proof}}{}\\end{{proof}}", self.conjecture, self.proof);
-        return self.client.comp(&prompt, &self.model, false, &self.reasoning_effort).await;
+        return self
+            .client
+            .comp(&prompt, &self.model, false, &self.reasoning_effort)
+            .await;
     }
 }

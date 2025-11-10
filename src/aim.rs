@@ -1,9 +1,9 @@
 use tokio::task::JoinSet;
 
-use crate::sessions::{Session, ResearchSessionConfig, ResearchSession};
 use crate::server;
+use crate::sessions::{ResearchSession, ResearchSessionConfig, Session};
 
-use log::{info, error};
+use log::{error, info};
 
 pub struct AIM {
     tokio_set: JoinSet<()>,
@@ -12,17 +12,23 @@ pub struct AIM {
 impl AIM {
     pub fn new() -> Self {
         AIM {
-            tokio_set: JoinSet::new()
+            tokio_set: JoinSet::new(),
         }
     }
 
     /// Run the HTTP server at the given bind address (e.g., "0.0.0.0:4000").
-    pub async fn runserver(&mut self, bind_addr: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn runserver(
+        &mut self,
+        bind_addr: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         server::app::run(bind_addr).await?;
         Ok(())
     }
 
-    pub async fn run_session(&mut self, config: ResearchSessionConfig) ->  Result<(), Box<dyn std::error::Error>> {
+    pub async fn run_session(
+        &mut self,
+        config: ResearchSessionConfig,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut session = ResearchSession::new(config);
         self.tokio_set.spawn(async move {
             if let Err(e) = session.run().await {

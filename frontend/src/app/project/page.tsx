@@ -5,7 +5,7 @@ import { Suspense } from 'react';
 import { BlockMath, InlineMath } from 'react-katex';
 import 'katex/dist/katex.min.css';
 import NavBar from '@/components/NavBar';
-import { FaSearch, FaInfoCircle } from 'react-icons/fa';
+import { FaSearch, FaInfoCircle, FaExclamationTriangle } from 'react-icons/fa';
 import LemmaList from '@/components/LemmaList';
 import LemmaDetail from '@/components/LemmaDetail';
 import CopyableBlock from '@/components/CopyableBlock';
@@ -48,6 +48,8 @@ function statusClass(status: string) {
     case 'running': return 'bg-blue-100 text-blue-800';
     case 'solved': return 'bg-green-100 text-green-800';
     case 'ended': return 'bg-gray-100 text-gray-800';
+    case 'failed': return 'bg-red-100 text-red-800';
+    case 'canceled': return 'bg-yellow-100 text-yellow-800';
     default: return 'bg-gray-100 text-gray-800';
   }
 }
@@ -77,6 +79,7 @@ interface Project {
   creator: string;
   // User-defined project notes/comments
   comment: string;
+  error?: string;
 }
 
 // Type for project config serialized from backend (snake_case keys)
@@ -223,6 +226,20 @@ const ProjectDetailContent: React.FC = () => {
                   {renderDescription(project.context)}
                 </div>
               </CopyableBlock>
+            </div>
+          )}
+          {project.error && project.error.trim().length > 0 && (
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4">
+              <div className="flex items-center text-red-700 font-semibold mb-1">
+                <FaExclamationTriangle className="mr-2" />
+                <span>{t('project_error_title')}</span>
+              </div>
+              <p className="text-sm text-red-700 whitespace-pre-wrap break-words">
+                {t('project_error_hint')}
+              </p>
+              <p className="mt-2 text-sm text-red-900 whitespace-pre-wrap break-words">
+                {project.error}
+              </p>
             </div>
           )}
           <div className="mt-3 flex items-center space-x-4">

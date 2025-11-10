@@ -1,8 +1,8 @@
+use log::{error, info, warn};
 use regex::Regex;
 use regex::escape as regex_escape;
-use log::{info, warn, error};
 use std::process::Stdio;
-use tokio::io::{AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 pub fn find_box(pred_str: &str) -> Option<String> {
@@ -47,9 +47,12 @@ pub fn find_box(pred_str: &str) -> Option<String> {
 pub fn extract_component(text: &str, tag: &str) -> Option<String> {
     // Extract the content in the last latex component (tags excluded)
     let escaped_tag = regex_escape(tag);
-    let pattern = format!(r"(?s)\\begin\{{{0}\}}((?:.|\n)*?)\\end\{{{0}\}}", escaped_tag);
+    let pattern = format!(
+        r"(?s)\\begin\{{{0}\}}((?:.|\n)*?)\\end\{{{0}\}}",
+        escaped_tag
+    );
     let re = Regex::new(&pattern).ok()?;
-    
+
     re.captures_iter(text)
         .last()
         .and_then(|caps| caps.get(1).map(|m| m.as_str().to_string()))
@@ -62,7 +65,10 @@ pub fn extract_component(text: &str, tag: &str) -> Option<String> {
 pub fn extract_all_component(text: &str, tag: &str) -> Vec<String> {
     // Extract all the content in the xml-style tag (tags excluded)
     let escaped_tag = regex_escape(tag);
-    let pattern = format!(r"(?s)\\begin\{{{0}\}}((?:.|\n)*?)\\end\{{{0}\}}", escaped_tag);
+    let pattern = format!(
+        r"(?s)\\begin\{{{0}\}}((?:.|\n)*?)\\end\{{{0}\}}",
+        escaped_tag
+    );
     let re = match Regex::new(&pattern) {
         Ok(re) => re,
         Err(e) => {
@@ -71,7 +77,8 @@ pub fn extract_all_component(text: &str, tag: &str) -> Vec<String> {
         }
     };
 
-    let contents: Vec<_> = re.captures_iter(text)
+    let contents: Vec<_> = re
+        .captures_iter(text)
         .filter_map(|caps| caps.get(1).map(|m| m.as_str().to_string()))
         .collect();
 
@@ -86,11 +93,12 @@ fn extract_report_from_deer_flow(raw_output: &str) -> String {
     // It might need to be frequently updated to fit new versions of deer-flow
     const MARKER: &str = "reporter response:";
     let truncated_content = match raw_output.find(MARKER) {
-        Some(index) => {
-            &raw_output[index + MARKER.len()..].trim_start()
-        }
+        Some(index) => &raw_output[index + MARKER.len()..].trim_start(),
         None => {
-            warn!("The \"{}\" was not found in the output of deer flow", MARKER);
+            warn!(
+                "The \"{}\" was not found in the output of deer flow",
+                MARKER
+            );
             warn!("Raw output content: {}", raw_output);
             ""
         }
@@ -107,7 +115,9 @@ fn extract_report_from_deer_flow(raw_output: &str) -> String {
     return cleaned_lines.join("\n");
 }
 
-pub async fn search_bkg_deer_flow(problem: &str) -> Result<String, Box<dyn std::error::Error>> {
+pub async fn search_bkg_deer_flow(
+    problem: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     // This function starts a new process to run deer-flow with uv venv
     // This will try to extract background information, recent findings and methods for the given
     // problem, and returns an empty string if it failed
@@ -119,24 +129,41 @@ pub async fn search_bkg_deer_flow(problem: &str) -> Result<String, Box<dyn std::
         .stderr(Stdio::piped())
         .spawn()?;
     info!("Started deer-flow as a subprocess to extract backgrounds for this problem");
-    let mut child_stdin = df_process.stdin.take().expect("Failed to open the stdin of deer-flow process");
+    let mut child_stdin = df_process
+        .stdin
+        .take()
+        .expect("Failed to open the stdin of deer-flow process");
     let problem_content: String = problem.to_string();
     let stdin_task = tokio::spawn(async move {
-        let prompt_to_deer_flow = 
-            format!("I am currently working on a math problem, and I want you to help me make a survey on the background of this problem. You should search through relevant papers on arxiv, and for each paper you have collected, you need to summarize two primary information for me. 1. important lemmas and theorems obtained in this paper; 2. the methods used in this paper to obtain the desired conclusion. Please explain both the theoretical results and methods in detail in your report. The problem I am working on is \"{}\".", problem_content);
-        child_stdin.write_all(
-            prompt_to_deer_flow.as_bytes()
-        ).await.expect("Failed to write to stdin of deer-flow");
-        child_stdin.shutdown().await.expect("Failed to shutdown the stdin of deer-flow");
+        let prompt_to_deer_flow = format!(
+            "I am currently working on a math problem, and I want you to help me make a survey on the background of this problem. You should search through relevant papers on arxiv, and for each paper you have collected, you need to summarize two primary information for me. 1. important lemmas and theorems obtained in this paper; 2. the methods used in this paper to obtain the desired conclusion. Please explain both the theoretical results and methods in detail in your report. The problem I am working on is \"{}\".",
+            problem_content
+        );
+        child_stdin
+            .write_all(prompt_to_deer_flow.as_bytes())
+            .await
+            .expect("Failed to write to stdin of deer-flow");
+        child_stdin
+            .shutdown()
+            .await
+            .expect("Failed to shutdown the stdin of deer-flow");
     });
     stdin_task.await?;
     let output = df_process.wait_with_output().await?;
     if output.status.success() {
-        return Ok(extract_report_from_deer_flow(&String::from_utf8_lossy(&output.stderr)));
+        return Ok(extract_report_from_deer_flow(&String::from_utf8_lossy(
+            &output.stderr,
+        )));
     } else {
         error!("deer-flow process failed with status: {}", output.status);
-        error!("deer-flow stdout: {}", String::from_utf8_lossy(&output.stdout));
-        error!("deer-flow stderr: {}", String::from_utf8_lossy(&output.stderr));
+        error!(
+            "deer-flow stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        error!(
+            "deer-flow stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         return Ok(String::new());
     }
 }

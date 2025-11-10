@@ -108,8 +108,9 @@ const en: Dict = {
   saved: 'Saved!',
   failed_to_save: 'Failed to save',
   save: 'Save',
-  project_loading_wait: 'Loading project data, please wait...'
-  ,
+  project_loading_wait: 'Loading project data, please wait...',
+  project_error_title: 'Session Error',
+  project_error_hint: 'The backend stopped this project with the following message:',
   // Lemma components
   status_label: 'Status:',
   importance_label: 'Importance:',
@@ -252,8 +253,9 @@ const zh: Dict = {
   saved: '已保存！',
   failed_to_save: '保存失败',
   save: '保存',
-  project_loading_wait: '加载项目数据中，请稍候...'
-  ,
+  project_loading_wait: '加载项目数据中，请稍候...',
+  project_error_title: '运行错误',
+  project_error_hint: '后端因以下原因中止了该项目：',
   // Lemma components
   status_label: '状态:',
   importance_label: '重要性:',

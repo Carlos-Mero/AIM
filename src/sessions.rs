@@ -1,27 +1,29 @@
-use std::path::{PathBuf};
 use std::fs;
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::agents::{Agent, Explorer, Reviewer, Refiner, Formatter, ProofSummarizer, MemoryBlock, Memory};
-use crate::utils::{extract_component, extract_all_component, find_box, search_bkg_deer_flow};
+use crate::agents::{
+    Agent, Explorer, Formatter, Memory, MemoryBlock, ProofSummarizer, Refiner, Reviewer,
+};
+use crate::utils::{extract_all_component, extract_component, find_box, search_bkg_deer_flow};
 use indicatif::{ProgressBar, ProgressStyle};
 use tokio::task::JoinSet;
 
-use log::{info, warn, debug, error};
-use serde::{Serialize, Deserialize};
-use sea_orm::{DatabaseConnection, Statement, DbBackend, ConnectionTrait};
 use chrono::Utc;
+use log::{debug, error, info, warn};
+use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, Statement};
+use serde::{Deserialize, Serialize};
 
 #[async_trait::async_trait]
 pub trait Session: Send {
     /// Run locally, persisting to filesystem
-    async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>>;
+    async fn run(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
     /// Run remotely, persisting to database
     async fn remote_run(
         &mut self,
         db: &DatabaseConnection,
         user_id: i32,
-    ) -> Result<(), Box<dyn std::error::Error>>;
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 }
 
 const MAX_REVIEWS_PER_NODE: u8 = 24;
@@ -39,33 +41,83 @@ pub struct ResearchSessionConfig {
     currect_steps: u32,
     problem: String,
     context: String,
-    resume: bool, // resume from existing explore trajectory
-    reformat: bool, // reformat conjectures and proofs after exploration
-    streaming: bool, // streaming output in exploration
+    resume: bool,             // resume from existing explore trajectory
+    reformat: bool,           // reformat conjectures and proofs after exploration
+    streaming: bool,          // streaming output in exploration
     theorem_graph_mode: bool, // whether to use theorem graph mode
     reasoning_effort: String, // new field for reasoning_effort
 }
 
 impl ResearchSessionConfig {
-    pub fn new() -> Self {Self::default()}
-    pub fn title(mut self, title: impl Into<String>) -> Self { self.title = title.into(); self }
-    pub fn proof_model(mut self, proof_model: impl Into<String>) -> Self {self.proof_model = proof_model.into(); self}
-    pub fn eval_model(mut self, eval_model: impl Into<String>) -> Self {self.eval_model = eval_model.into(); self}
-    pub fn reform_model(mut self, reform_model: impl Into<String>) -> Self {self.reform_model = reform_model.into(); self}
-    pub fn logdir(mut self, logdir: impl Into<String>) -> Self {self.logdir = PathBuf::from(logdir.into()); self}
-    pub fn steps(mut self, steps: u32) -> Self {self.steps = steps; self}
-    pub fn reviews(mut self, reviews: u8) -> Self {self.reviews = reviews; self}
-    pub fn iterations(mut self, iterations: u8) -> Self {self.iterations = iterations; self}
-    pub fn resume(mut self, resume: bool) -> Self {self.resume = resume; self}
-    pub fn reformat(mut self, reformat: bool) -> Self {self.reformat = reformat; self}
-    pub fn streaming(mut self, streaming: bool) -> Self {self.streaming = streaming; self}
-    pub fn theorem_graph_mode(mut self, tgm: bool) -> Self {self.theorem_graph_mode = tgm; self}
-    pub fn reasoning_effort(mut self, effort: impl Into<String>) -> Self {self.reasoning_effort = effort.into(); self}
-    pub fn set_current_steps(&mut self, steps: u32) -> &Self {self.currect_steps = steps; self}
-    pub fn set_problem(&mut self, problem: impl Into<String>) -> &Self {self.problem = problem.into(); self}
-    pub fn set_context(&mut self, context: impl Into<String>) -> &Self {self.context = context.into(); self}
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn title(mut self, title: impl Into<String>) -> Self {
+        self.title = title.into();
+        self
+    }
+    pub fn proof_model(mut self, proof_model: impl Into<String>) -> Self {
+        self.proof_model = proof_model.into();
+        self
+    }
+    pub fn eval_model(mut self, eval_model: impl Into<String>) -> Self {
+        self.eval_model = eval_model.into();
+        self
+    }
+    pub fn reform_model(mut self, reform_model: impl Into<String>) -> Self {
+        self.reform_model = reform_model.into();
+        self
+    }
+    pub fn logdir(mut self, logdir: impl Into<String>) -> Self {
+        self.logdir = PathBuf::from(logdir.into());
+        self
+    }
+    pub fn steps(mut self, steps: u32) -> Self {
+        self.steps = steps;
+        self
+    }
+    pub fn reviews(mut self, reviews: u8) -> Self {
+        self.reviews = reviews;
+        self
+    }
+    pub fn iterations(mut self, iterations: u8) -> Self {
+        self.iterations = iterations;
+        self
+    }
+    pub fn resume(mut self, resume: bool) -> Self {
+        self.resume = resume;
+        self
+    }
+    pub fn reformat(mut self, reformat: bool) -> Self {
+        self.reformat = reformat;
+        self
+    }
+    pub fn streaming(mut self, streaming: bool) -> Self {
+        self.streaming = streaming;
+        self
+    }
+    pub fn theorem_graph_mode(mut self, tgm: bool) -> Self {
+        self.theorem_graph_mode = tgm;
+        self
+    }
+    pub fn reasoning_effort(mut self, effort: impl Into<String>) -> Self {
+        self.reasoning_effort = effort.into();
+        self
+    }
+    pub fn set_current_steps(&mut self, steps: u32) -> &Self {
+        self.currect_steps = steps;
+        self
+    }
+    pub fn set_problem(&mut self, problem: impl Into<String>) -> &Self {
+        self.problem = problem.into();
+        self
+    }
+    pub fn set_context(&mut self, context: impl Into<String>) -> &Self {
+        self.context = context.into();
+        self
+    }
 
-    pub fn save_configs(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn save_configs(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let serialized_config = serde_json::to_string_pretty(self)?;
         let config_path = self.logdir.as_path().join("config.json");
         fs::write(config_path, serialized_config)?;
@@ -99,10 +151,11 @@ impl ResearchSession {
             .reasoning_effort(config.reasoning_effort.clone());
         let mut mem = Memory::new();
         if !config.context.is_empty() {
-            mem.update(MemoryBlock::new()
-                .memtype("context")
-                .content(&config.context)
-                .solved(true)
+            mem.update(
+                MemoryBlock::new()
+                    .memtype("context")
+                    .content(&config.context)
+                    .solved(true),
             );
         }
         ResearchSession {
@@ -114,16 +167,17 @@ impl ResearchSession {
         }
     }
 
-    pub async fn load_context(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn load_context(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let context_path = self.config.logdir.as_path().join("context.md");
         if !context_path.exists() {
             info!("No context provided to this problem, searching for related info via deer-flow.");
             let context = search_bkg_deer_flow(&self.config.problem).await?;
             info!("loaded problem context: {:?}", &context);
-            self.memory.update(MemoryBlock::new()
-                .memtype("context")
-                .content(context)
-                .solved(true)
+            self.memory.update(
+                MemoryBlock::new()
+                    .memtype("context")
+                    .content(context)
+                    .solved(true),
             );
             // warn!("Problem context does not exist in session: {:#?}!", &context_path);
             // info!("Running AIM without problem context.");
@@ -131,18 +185,22 @@ impl ResearchSession {
         }
         let context = fs::read_to_string(context_path)?;
         info!("loaded problem context: {:?}", &context);
-        self.memory.update(MemoryBlock::new()
-            .memtype("context")
-            .content(context)
-            .solved(true)
+        self.memory.update(
+            MemoryBlock::new()
+                .memtype("context")
+                .content(context)
+                .solved(true),
         );
         Ok(())
     }
 
-    pub fn resume(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn resume(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let memory_path = self.config.logdir.as_path().join("memory.json");
         if !memory_path.exists() {
-            warn!("History memory does not exist in session: {:#?}!", &memory_path);
+            warn!(
+                "History memory does not exist in session: {:#?}!",
+                &memory_path
+            );
             return Ok(());
         }
         let memory_json = fs::read_to_string(memory_path)?;
@@ -189,7 +247,7 @@ impl ResearchSession {
                     } else {
                         res.push(None);
                     }
-                },
+                }
                 Err(e) => {
                     error!("Task failed: {:#?}", e);
                     res.push(None);
@@ -199,7 +257,10 @@ impl ResearchSession {
         Some(res)
     }
 
-    pub async fn backtrace_review_from(&mut self, id: usize) -> Result<bool, Box<dyn std::error::Error>> {
+    pub async fn backtrace_review_from(
+        &mut self,
+        id: usize,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         // Obtain proof path ids in decreasing order
         let proof_path_ids = self.memory.get_proof_path_ids(id, true);
         info!("Start reviewing the proof path: {:?}", &proof_path_ids);
@@ -236,7 +297,10 @@ impl ResearchSession {
                         info!("Generated proof summary for memory ID {}", i);
                     }
                     Err(e) => {
-                        warn!("Failed to generate proof summary for memory ID {}: {}", i, e);
+                        warn!(
+                            "Failed to generate proof summary for memory ID {}: {}",
+                            i, e
+                        );
                     }
                 }
             }
@@ -245,7 +309,10 @@ impl ResearchSession {
         Ok(path_correctness)
     }
 
-    pub async fn backtrace_refine_from(&mut self, id: usize) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn backtrace_refine_from(
+        &mut self,
+        id: usize,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let proof_path_ids = self.memory.get_proof_path_ids(id, true);
         info!("Start refining the proof path: {:?}", &proof_path_ids);
         let mut tasks: JoinSet<(usize, String)> = JoinSet::new();
@@ -258,7 +325,9 @@ impl ResearchSession {
             if review.is_empty() {
                 continue;
             }
-            let mut refiner = Refiner::new().model(&self.config.proof_model).streaming(false);
+            let mut refiner = Refiner::new()
+                .model(&self.config.proof_model)
+                .streaming(false);
             if let Some(context) = self.memory.format_deps(i, false, false) {
                 refiner.set_context(context);
             }
@@ -273,7 +342,10 @@ impl ResearchSession {
         while let Some(res) = tasks.join_next().await {
             if let Ok((memid, reproof)) = res {
                 let memblock = &mut self.memory.memory[memid];
-                info!("One refinement complete for conjecture: {}.", memblock.content);
+                info!(
+                    "One refinement complete for conjecture: {}.",
+                    memblock.content
+                );
                 if !reproof.is_empty() {
                     memblock.set_comment(String::new());
                     memblock.set_proof_summary(String::new());
@@ -312,21 +384,88 @@ impl ResearchSession {
         self.memory.update(nmemory);
     }
 
-    async fn save_memory(&self) -> Result<(), Box<dyn std::error::Error>> {
+    async fn drive_remote_pipeline(
+        &mut self,
+        db: &DatabaseConnection,
+        project_filter: &str,
+        need_search: bool,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        if need_search {
+            let new_ctx = search_bkg_deer_flow(&self.config.problem).await?;
+            self.update_memory_graph(
+                MemoryBlock::new()
+                    .memtype("context")
+                    .content(&new_ctx)
+                    .solved(true),
+            );
+            let mem_json = serde_json::to_string(&self.memory.memory)?;
+            let now = Utc::now().to_rfc3339().replace("'", "''");
+            let ctx_sql = new_ctx.replace("'", "''");
+            let upd_sql = format!(
+                "UPDATE projects SET context='{}', memory='{}', last_active='{}' WHERE {}",
+                ctx_sql,
+                mem_json.replace("'", "''"),
+                now,
+                project_filter,
+            );
+            db.execute(Statement::from_string(DbBackend::Sqlite, upd_sql))
+                .await?;
+        }
+
+        let mut solved_flag = false;
+        for _ in 0..self.config.steps {
+            let done = if self.config.theorem_graph_mode {
+                self.graph_step().await?
+            } else {
+                self.step().await?
+            };
+            let mem_json = serde_json::to_string(&self.memory.memory)?;
+            let now = Utc::now().to_rfc3339().replace("'", "''");
+            let lemmas = self
+                .memory
+                .memory
+                .iter()
+                .filter(|m| m.memtype == "lemma")
+                .count() as i32;
+            let upd_sql = format!(
+                "UPDATE projects SET memory='{}', last_active='{}', lemmas_count={} WHERE {}",
+                mem_json.replace("'", "''"),
+                now,
+                lemmas,
+                project_filter,
+            );
+            db.execute(Statement::from_string(DbBackend::Sqlite, upd_sql))
+                .await?;
+            if done {
+                solved_flag = true;
+                break;
+            }
+        }
+
+        Ok(solved_flag)
+    }
+
+    async fn save_memory(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let memory_path = self.config.logdir.as_path().join("memory.json");
         let memory_file = fs::File::create(memory_path)?;
         serde_json::to_writer_pretty(memory_file, &self.memory)?;
         Ok(())
     }
 
-    async fn format_memory_to_markdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    async fn format_memory_to_markdown(
+        &mut self,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Format all memory contents into standard markdown texts
         info!("reformatting lemma statements");
-        let pb = ProgressBar::new(self.memory.memory.len() as u64).with_style(ProgressStyle::with_template(
-            "{msg} [{elapsed_precise}] {wide_bar} {pos}/{len} (eta: {eta})"
-        )?);
+        let pb = ProgressBar::new(self.memory.memory.len() as u64).with_style(
+            ProgressStyle::with_template(
+                "{msg} [{elapsed_precise}] {wide_bar} {pos}/{len} (eta: {eta})",
+            )?,
+        );
         pb.set_message("Formatting Lemmas");
-        let lemma_tasks: Vec<_> = self.memory.memory
+        let lemma_tasks: Vec<_> = self
+            .memory
+            .memory
             .iter()
             .enumerate()
             .map(|(i, mem)| {
@@ -340,7 +479,8 @@ impl ResearchSession {
                     pb.inc(1);
                     (i, response)
                 })
-            }).collect();
+            })
+            .collect();
         let results = futures::future::join_all(lemma_tasks).await;
         pb.finish();
         for result in results {
@@ -356,11 +496,15 @@ impl ResearchSession {
             }
         }
         info!("reformatting proofs");
-        let pb = ProgressBar::new(self.memory.memory.len() as u64).with_style(ProgressStyle::with_template(
-            "{msg} [{elapsed_precise}] {wide_bar} {pos}/{len} (eta: {eta})"
-        )?);
+        let pb = ProgressBar::new(self.memory.memory.len() as u64).with_style(
+            ProgressStyle::with_template(
+                "{msg} [{elapsed_precise}] {wide_bar} {pos}/{len} (eta: {eta})",
+            )?,
+        );
         pb.set_message("Formatting Proofs");
-        let proof_tasks: Vec<_> = self.memory.memory
+        let proof_tasks: Vec<_> = self
+            .memory
+            .memory
             .iter()
             .enumerate()
             .map(|(i, mem)| {
@@ -374,7 +518,8 @@ impl ResearchSession {
                     pb.inc(1);
                     (i, response)
                 })
-            }).collect();
+            })
+            .collect();
         let results = futures::future::join_all(proof_tasks).await;
         pb.finish();
         for result in results {
@@ -389,7 +534,10 @@ impl ResearchSession {
                 }
             }
         }
-        info!("Done formatting all {} memory blocks", self.memory.memory.len());
+        info!(
+            "Done formatting all {} memory blocks",
+            self.memory.memory.len()
+        );
         Ok(())
     }
 
@@ -404,7 +552,10 @@ impl ResearchSession {
             let contents = format!("# Explore Trajectory of AIM\n\n{}", memory_content);
             fs::write(md_path, contents)?;
         }
-        if let Some(proof_path_content) = self.memory.format_deps(self.memory.memory.len() - 1, true, true) {
+        if let Some(proof_path_content) =
+            self.memory
+                .format_deps(self.memory.memory.len() - 1, true, true)
+        {
             info!("Saving proof paths to path: {:#?}", pp_path);
             let contents = format!("# Complete Proof Path of AIM\n\n{}", proof_path_content);
             fs::write(pp_path, contents)?;
@@ -412,7 +563,7 @@ impl ResearchSession {
         Ok(())
     }
 
-    pub async fn graph_step(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
+    pub async fn graph_step(&mut self) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         if let Some(context) = self.memory.format_all_with_proof_summary(true) {
             self.explorer.set_context(&context);
         }
@@ -421,34 +572,43 @@ impl ResearchSession {
         let proof = extract_component(&raw_exploration, "proof").unwrap_or_default();
         let final_proof = extract_component(&raw_exploration, "final_proof").unwrap_or_default();
         let deps = extract_component(&raw_exploration, "dependency").unwrap_or_default();
-        if (conj.is_empty() || proof.is_empty() || deps.is_empty()) && (final_proof.is_empty() || deps.is_empty()) {
-            error!("Incomplete response format: conjecture {}; proof {}; dependency {}; final_proof: {};",
-                !conj.is_empty(), !proof.is_empty(), !deps.is_empty(), !final_proof.is_empty());
+        if (conj.is_empty() || proof.is_empty() || deps.is_empty())
+            && (final_proof.is_empty() || deps.is_empty())
+        {
+            error!(
+                "Incomplete response format: conjecture {}; proof {}; dependency {}; final_proof: {};",
+                !conj.is_empty(),
+                !proof.is_empty(),
+                !deps.is_empty(),
+                !final_proof.is_empty()
+            );
             return Ok(false);
         }
         if final_proof.is_empty() {
             info!("Collected one new conjecture: {}", &conj);
-            self.update_memory_graph(MemoryBlock::new()
-                .memtype("lemma")
-                .content(&conj)
-                .proof(&proof)
-                .deps(serde_json::from_str::<Vec<usize>>(&deps).unwrap_or_default())
-                .solved(false)
-                .reviews(0)
+            self.update_memory_graph(
+                MemoryBlock::new()
+                    .memtype("lemma")
+                    .content(&conj)
+                    .proof(&proof)
+                    .deps(serde_json::from_str::<Vec<usize>>(&deps).unwrap_or_default())
+                    .solved(false)
+                    .reviews(0),
             );
         } else {
             info!("Collected the final proof of this problem.");
-            self.update_memory_graph(MemoryBlock::new()
-                .memtype("theorem")
-                .content(&self.config.problem)
-                .proof(&final_proof)
-                .deps(serde_json::from_str::<Vec<usize>>(&deps).unwrap_or_default())
-                .solved(false)
-                .reviews(0)
+            self.update_memory_graph(
+                MemoryBlock::new()
+                    .memtype("theorem")
+                    .content(&self.config.problem)
+                    .proof(&final_proof)
+                    .deps(serde_json::from_str::<Vec<usize>>(&deps).unwrap_or_default())
+                    .solved(false)
+                    .reviews(0),
             );
         }
         let memid = self.memory.memory.len() - 1;
-        for i in 0..self.config.iterations+1 {
+        for i in 0..self.config.iterations + 1 {
             info!("Starting the {}-th iteration", i);
             if self.backtrace_review_from(memid).await? {
                 info!("backtrace review ended and the proof path is correct.");
@@ -460,14 +620,15 @@ impl ResearchSession {
         }
 
         if self.memory.memory[memid].is_solved()
-        && self.memory.memory[memid].memtype == "theorem"
-        && self.memory.memory[memid].content == self.config.problem {
+            && self.memory.memory[memid].memtype == "theorem"
+            && self.memory.memory[memid].content == self.config.problem
+        {
             return Ok(true);
         }
         return Ok(false);
     }
 
-    pub async fn step(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
+    pub async fn step(&mut self) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         // One exploration step of research session.
         // This function retures true if the problem is solved, else it will return false.
         let raw_exploration = self.explorer._process().await?;
@@ -480,15 +641,23 @@ impl ResearchSession {
             error!(
                 "Mismatched number of conjectures ({}) and proofs ({})",
                 conjectures.len(),
-                proofs.len());
+                proofs.len()
+            );
             debug!("Extracted conjectures: {:#?}", &conjectures);
             debug!("Extracted proofs: {:#?}", &proofs);
             return Ok(false);
         } else {
-            info!("Successfully collected {} conjectures and proofs in exploration.", conjectures.len());
+            info!(
+                "Successfully collected {} conjectures and proofs in exploration.",
+                conjectures.len()
+            );
         }
 
-        for ((conj, proof), deps) in conjectures.iter_mut().zip(proofs.iter_mut()).zip(depss.iter_mut()) {
+        for ((conj, proof), deps) in conjectures
+            .iter_mut()
+            .zip(proofs.iter_mut())
+            .zip(depss.iter_mut())
+        {
             info!("Start verifying a conjecture");
             for i in 0..self.config.iterations {
                 self.reviewer.set_conjecture(&*conj);
@@ -520,13 +689,14 @@ impl ResearchSession {
                         return Ok(false);
                     }
                 } else {
-                    self.update_memory(MemoryBlock::new()
-                        .memtype("lemma")
-                        .content(&*conj)
-                        .proof(&*proof)
-                        .deps(serde_json::from_str::<Vec<usize>>(deps).unwrap_or_default())
-                        .solved(true)
-                        .reviews(self.config.reviews)
+                    self.update_memory(
+                        MemoryBlock::new()
+                            .memtype("lemma")
+                            .content(&*conj)
+                            .proof(&*proof)
+                            .deps(serde_json::from_str::<Vec<usize>>(deps).unwrap_or_default())
+                            .solved(true)
+                            .reviews(self.config.reviews),
                     );
                     break;
                 }
@@ -551,13 +721,17 @@ impl ResearchSession {
                         final_proof = n_proof;
                     }
                 } else {
-                    self.update_memory(MemoryBlock::new()
-                        .memtype("theorem")
-                        .content(&self.config.problem)
-                        .proof(&final_proof)
-                        .deps(serde_json::from_str::<Vec<usize>>(&depss[depss.len()-1]).unwrap_or_default())
-                        .solved(true)
-                        .reviews(self.config.reviews)
+                    self.update_memory(
+                        MemoryBlock::new()
+                            .memtype("theorem")
+                            .content(&self.config.problem)
+                            .proof(&final_proof)
+                            .deps(
+                                serde_json::from_str::<Vec<usize>>(&depss[depss.len() - 1])
+                                    .unwrap_or_default(),
+                            )
+                            .solved(true)
+                            .reviews(self.config.reviews),
                     );
                     return Ok(true);
                 }
@@ -572,11 +746,14 @@ impl ResearchSession {
 
 #[async_trait::async_trait]
 impl Session for ResearchSession {
-    async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    async fn run(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if !self.config.logdir.exists() {
             panic!("Project path {:?} does not exist!", &self.config.logdir);
         }
-        info!("Starting ResearchSession from logdir: {:?}", &self.config.logdir);
+        info!(
+            "Starting ResearchSession from logdir: {:?}",
+            &self.config.logdir
+        );
 
         let problem_path = self.config.logdir.as_path().join("problem.md");
         let problem = fs::read_to_string(problem_path)?;
@@ -602,9 +779,10 @@ impl Session for ResearchSession {
             self.load_context().await?;
         }
 
-        let pb = ProgressBar::new(self.config.steps.into()).with_style(ProgressStyle::with_template(
-            "{msg} [{elapsed_precise}] {wide_bar} {pos}/{len} (eta: {eta})"
-        )?);
+        let pb =
+            ProgressBar::new(self.config.steps.into()).with_style(ProgressStyle::with_template(
+                "{msg} [{elapsed_precise}] {wide_bar} {pos}/{len} (eta: {eta})",
+            )?);
         pb.set_message("Exploring");
         for i in 0..self.config.steps {
             info!("Starting Exploration Step: {}", i);
@@ -616,7 +794,9 @@ impl Session for ResearchSession {
             };
             self.save_memory().await?;
             pb.inc(1);
-            if solved {break;}
+            if solved {
+                break;
+            }
         }
         self.format_to_markdown().await?;
 
@@ -627,7 +807,7 @@ impl Session for ResearchSession {
         &mut self,
         db: &DatabaseConnection,
         user_id: i32,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Set up problem and initial context/memory
         self.explorer.set_problem(self.config.problem.clone());
         // Prepare timestamp and initial record
@@ -635,9 +815,13 @@ impl Session for ResearchSession {
         let cfg_json = serde_json::to_string(&self.config)?;
         let init_mem = serde_json::to_string(&self.memory)?;
         // Determine if we need to fetch context via deer-flow
-        let ctx = self.memory.memory.iter()
+        let ctx = self
+            .memory
+            .memory
+            .iter()
             .find(|m| m.memtype == "context")
-            .map(|m| m.content.clone()).unwrap_or_default();
+            .map(|m| m.content.clone())
+            .unwrap_or_default();
         let need_search = ctx.is_empty();
         // Insert placeholder for initial project record
         let ctx_for_insert = if need_search {
@@ -647,7 +831,12 @@ impl Session for ResearchSession {
         };
         let title = self.config.title.replace("'", "''");
         // initial lemma count from memory blocks
-        let init_lemmas = self.memory.memory.iter().filter(|m| m.memtype == "lemma").count() as i32;
+        let init_lemmas = self
+            .memory
+            .memory
+            .iter()
+            .filter(|m| m.memtype == "lemma")
+            .count() as i32;
         let insert_sql = format!(
             "INSERT INTO projects (user_id, title, problem, context, config, memory, created_at, last_active, lemmas_count, status) VALUES ({}, '{}', '{}', '{}', '{}', '{}', '{}', '{}', {}, 'running')",
             user_id,
@@ -660,65 +849,42 @@ impl Session for ResearchSession {
             ts,
             init_lemmas,
         );
-        db.execute(Statement::from_string(DbBackend::Sqlite, insert_sql)).await?;
-        // If we need to fetch context, perform search and update the project record
-        if need_search {
-            // fetch context via deer-flow
-            let new_ctx = search_bkg_deer_flow(&self.config.problem).await?;
-            // update in-memory graph
-            self.update_memory_graph(MemoryBlock::new()
-                .memtype("context")
-                .content(&new_ctx)
-                .solved(true)
-            );
-            // prepare updated memory and timestamp
-            let mem_json = serde_json::to_string(&self.memory.memory)?;
-            let now = Utc::now().to_rfc3339().replace("'", "''");
-            let ctx_sql = new_ctx.replace("'", "''");
-            // update projects: context, memory, last_active
-            let upd_sql = format!(
-                "UPDATE projects SET context='{}', memory='{}', last_active='{}' WHERE user_id={} AND created_at='{}'",
-                ctx_sql,
-                mem_json.replace("'", "''"),
-                now,
-                user_id,
-                ts,
-            );
-            db.execute(Statement::from_string(DbBackend::Sqlite, upd_sql)).await?;
-        }
-        // Exploration loop: update memory after each step
-        let mut solved_flag = false;
-        for _ in 0..self.config.steps {
-            let done = if self.config.theorem_graph_mode {
-                self.graph_step().await?
-            } else {
-                self.step().await?
-            };
-            // update memory, last_active and lemma count
-            let mem_json = serde_json::to_string(&self.memory.memory)?;
-            let now = Utc::now().to_rfc3339().replace("'", "''");
-            let lemmas = self.memory.memory.iter().filter(|m| m.memtype == "lemma").count() as i32;
-            let upd_sql = format!(
-                "UPDATE projects SET memory='{}', last_active='{}', lemmas_count={} WHERE user_id={} AND created_at='{}'",
-                mem_json.replace("'", "''"),
-                now,
-                lemmas,
-                user_id,
-                ts,
-            );
-        db.execute(Statement::from_string(DbBackend::Sqlite, upd_sql)).await?;
-            if done {
-                solved_flag = true;
-                break;
+        db.execute(Statement::from_string(DbBackend::Sqlite, insert_sql))
+            .await?;
+        let project_filter = format!("user_id={} AND created_at='{}'", user_id, ts);
+        let run_result = self
+            .drive_remote_pipeline(db, &project_filter, need_search)
+            .await;
+        match run_result {
+            Ok(solved_flag) => {
+                let status = if solved_flag { "solved" } else { "ended" };
+                let now = Utc::now().to_rfc3339().replace("'", "''");
+                let status_sql = format!(
+                    "UPDATE projects SET status='{}', error='', last_active='{}' WHERE {}",
+                    status, now, project_filter
+                );
+                db.execute(Statement::from_string(DbBackend::Sqlite, status_sql))
+                    .await?;
+                Ok(())
+            }
+            Err(e) => {
+                let err_msg = e.to_string();
+                let trimmed = err_msg.trim();
+                let truncated: String = trimmed.chars().take(512).collect();
+                let sanitized = truncated.replace("'", "''");
+                let now = Utc::now().to_rfc3339().replace("'", "''");
+                let err_sql = format!(
+                    "UPDATE projects SET status='failed', error='{}', last_active='{}' WHERE {}",
+                    sanitized, now, project_filter
+                );
+                if let Err(db_err) = db
+                    .execute(Statement::from_string(DbBackend::Sqlite, err_sql))
+                    .await
+                {
+                    error!("Failed to record project error: {}", db_err);
+                }
+                Err(e)
             }
         }
-        // After exploration loop, update final status: solved if a theorem was found, else ended
-        let status = if solved_flag { "solved" } else { "ended" };
-        let status_sql = format!(
-            "UPDATE projects SET status='{}' WHERE user_id={} AND created_at='{}'",
-            status, user_id, ts
-        );
-        db.execute(Statement::from_string(DbBackend::Sqlite, status_sql)).await?;
-        Ok(())
     }
 }

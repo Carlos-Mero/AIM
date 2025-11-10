@@ -1,13 +1,13 @@
 mod agents;
 mod aim;
+mod server;
 mod sessions;
 mod utils;
-mod server;
 use crate::aim::AIM;
 use crate::sessions::ResearchSessionConfig;
 
 use env_logger;
-use log::{error};
+use log::error;
 
 use clap::Parser;
 
@@ -65,11 +65,11 @@ struct Cli {
     server: bool,
     /// Port to bind in server mode
     #[arg(long = "port", default_value_t = 4000)]
-    port: u16
+    port: u16,
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cli = Cli::parse();
     use log::LevelFilter;
     // Initialize logger: default to 'info', but in --server mode silence agents & sessions to 'error'
@@ -84,7 +84,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut aim = AIM::new();
     if let Some(p) = cli.problem.as_deref() {
-        let config = ResearchSessionConfig::new().logdir(p)
+        let config = ResearchSessionConfig::new()
+            .logdir(p)
             .proof_model(cli.proof_model)
             .eval_model(cli.eval_model)
             .reform_model(cli.reform_model)

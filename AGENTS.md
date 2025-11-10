@@ -1,34 +1,24 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- Backend (Rust): `src/` with `main.rs`, `aim.rs`, `agents.rs`, `sessions.rs`, and `server/` for HTTP routes. Runtime artifacts: `aim.db` and `logs/`. Build output in `target/`.
-- Frontend (Next.js): `frontend/` with `public/` assets and `src/` components. See script aliases in `frontend/package.json`.
-- Research Integration: `deer-flow/` is a git submodule used to fetch literature context. It is optional for building the backend.
+Core Rust logic lives under `src/`: `main.rs` bootstraps the CLI/server, `aim.rs` orchestrates sessions, `agents.rs` defines reasoning pipelines, and `src/server` exposes the Actix + SeaORM HTTP stack. SQLite state persists in `aim.db`, with per-run traces stored under `logs/`. The Next.js UI is contained in `frontend/` (`src/` for routes/components, `public/` assets), while optional research tooling sits in `deer-flow/`.
 
 ## Build, Test, and Development Commands
-- Backend
-  - `cargo build --release` – build the `aim` binary.
-  - `cargo run -- --help` – run CLI; add `--server` to start HTTP API (port 4000).
-  - `cargo test` – run Rust tests.
-  - `cargo fmt --all` and `cargo clippy --all-targets -- -D warnings` – format and lint.
-- Frontend
-  - `cd frontend && npm install` – install deps.
-  - `npm run dev` | `npm run build` | `npm run start` | `npm run lint` – develop, build, serve, lint.
-- Deer-Flow
-  - `git submodule init && git submodule update`; then follow `deer-flow/README.md` (e.g., `uv run main.py`).
+- `cargo build --release`: Compile the binary to `target/release/aim`.
+- `cargo run -- --server`: Start the API (serves `frontend/out` when present).
+- `cargo install --path .`: Install `aim` into your local toolchain.
+- `npm install && npm run dev` inside `frontend/`: Dev server against `http://localhost:4000`.
+- `npm run build && npm run start`: Produce and serve the production bundle.
+- `uv run main.py` within `deer-flow/`: Run the optional literature workflow.
 
 ## Coding Style & Naming Conventions
-- Rust (edition 2024): 4-space indent, `rustfmt` defaults. Files/modules `snake_case`; types `CamelCase`; functions `snake_case`. Prefer `Result<T, E>` returns and clear error messages. Use existing logging (`log`/`tracing`) consistently.
-- Frontend: TypeScript, Next 15. Use ESLint (`next lint`) and prefer Tailwind utility classes where present. Avoid `any`; type props explicitly.
+Rust code targets edition 2024: four-space indentation, snake_case functions/modules, UpperCamelCase types. Always run `cargo fmt` plus `cargo clippy --all-targets --all-features`; treat clippy warnings as blockers. Frontend code should satisfy `npm run lint`, keep React components in PascalCase files, prefer hooks-based state, and reserve kebab-case for route folders. Secrets (`.env`, `.webui_secret_key`, SQLite files) must stay out of version control.
 
 ## Testing Guidelines
-- Rust unit tests co-located via `#[cfg(test)] mod tests { ... }`; integration tests in `tests/`. Run with `cargo test`.
-- Frontend tests are not yet configured; add only if necessary and document how to run them.
+Coverage is light, so each new Rust module should include focused unit tests run via `cargo test` (target modules with `cargo test sessions::tests::resume_state` when iterating). Mock external APIs instead of exercising real keys. Frontend work must pass `npm run lint`; add React Testing Library or Cypress coverage for interactive views and keep fixtures under `frontend/__tests__/`. Document one-off scripts in the PR to keep reviewers aligned.
 
 ## Commit & Pull Request Guidelines
-- Use Conventional Commits: `feat:`, `fix:`, `docs:`, `chore:`, and `feat!` for breaking changes (see `git log`).
-- PRs must include: concise description and scope, linked issues, local run instructions, screenshots for UI changes, and notes on API/DB changes. Ensure `cargo fmt`, `clippy`, and `frontend` lint pass. Do not commit secrets or `.env`.
+Stick to the Conventional Commit prefixes already in history (`feat:`, `fix:`, `docs:`, `chore:`). PR descriptions should state the motivation, enumerate changes, include command outputs (`cargo test`, `npm run build`, etc.), and attach screenshots or terminal snippets for UI/CLI changes. Link issues with `Closes #123` and request review only after formatter, linter, and build commands succeed locally.
 
 ## Security & Configuration Tips
-- Never commit `.env`, `aim.db`, `logs/`, or `target/` (already in `.gitignore`).
-- Set `OPENAI_API_KEY` and related vars in `.env`. For the web UI, set `frontend/.env.local` with `NEXT_PUBLIC_API_BASE_URL`.
+Create `.env` manually (there is no example file) with `OPENAI_API_KEY`, optional `AIM_ADMIN_EMAIL`, and invite codes, and keep it untracked. Scope `aim.db` to the project folder so `--resume` only touches the intended session, and set `NEXT_PUBLIC_API_BASE_URL` before serving the frontend through a TLS-terminating proxy or gateway.

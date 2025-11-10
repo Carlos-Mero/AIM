@@ -1,17 +1,25 @@
-use actix_web::{web, App, HttpResponse, HttpServer, Responder, HttpRequest};
-use actix_files::Files;
-use actix_cors::Cors;
-use bcrypt::{hash, verify, DEFAULT_COST};
-use chrono::{DateTime, Utc};
-use sea_orm::{Database, DatabaseConnection, Statement, EntityTrait, QueryFilter, ColumnTrait, ActiveModelTrait, Set, ConnectionTrait, DbBackend};
-use actix_web::web::Path;
-use crate::server::entity::user::{Entity as User, ActiveModel as UserActiveModel, Column as UserColumn};
-use jsonwebtoken::{encode, decode, EncodingKey, DecodingKey, Header, Algorithm, Validation};
-use crate::sessions::{ResearchSession, ResearchSessionConfig, Session};
-use log::{info, error};
-use serde::{Serialize, Deserialize};
 use crate::agents::default_datetime;
+use crate::server::entity::user::{
+    ActiveModel as UserActiveModel, Column as UserColumn, Entity as User,
+};
+use crate::sessions::{ResearchSession, ResearchSessionConfig, Session};
+use actix_cors::Cors;
+use actix_files::Files;
+use actix_web::web::Path;
+use actix_web::{App, HttpRequest, HttpResponse, HttpServer, Responder, web};
+use bcrypt::{DEFAULT_COST, hash, verify};
+use chrono::{DateTime, Utc};
 use dotenvy::dotenv;
+use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
+use log::{error, info};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, Database, DatabaseConnection, DbBackend,
+    EntityTrait, QueryFilter, Set, Statement,
+};
+use serde::{Deserialize, Serialize};
+use tokio::signal::ctrl_c;
+#[cfg(unix)]
+use tokio::signal::unix::{SignalKind, signal as unix_signal};
 /// Check if the given email is listed in the AIM_ADMIN_EMAIL env var (comma-separated)
 fn is_admin_email(user_email: &str) -> bool {
     match std::env::var("AIM_ADMIN_EMAIL") {
@@ -28,6 +36,22 @@ struct Claims {
     exp: usize,
 }
 
+/// Mark every project that is currently "running" as "canceled" and attach a reason.
+async fn cancel_running_projects(
+    db: &DatabaseConnection,
+    reason: &str,
+) -> Result<(), sea_orm::DbErr> {
+    let timestamp = Utc::now().to_rfc3339().replace("'", "''");
+    let sanitized_reason = reason.replace("'", "''");
+    let sql = format!(
+        "UPDATE projects SET status='canceled', error='{}', last_active='{}' WHERE status='running'",
+        sanitized_reason, timestamp
+    );
+    db.execute(Statement::from_string(DbBackend::Sqlite, sql))
+        .await?;
+    Ok(())
+}
+
 /// Run the AIM HTTP server, binding to the given address (e.g., "0.0.0.0:4000").
 pub async fn run(bind_addr: &str) -> std::io::Result<()> {
     // Determine database path (env DATABASE_PATH or default "aim.db")
@@ -41,7 +65,8 @@ pub async fn run(bind_addr: &str) -> std::io::Result<()> {
     }
     let db_url = format!("sqlite://{}?mode=rwc", db_path);
     // Connect to SQLite via SeaORM
-    let db: DatabaseConnection = Database::connect(&db_url).await
+    let db: DatabaseConnection = Database::connect(&db_url)
+        .await
         .expect(&format!("Failed to connect to database: {}", db_url));
     // Initialize database schema if not exists (raw SQL)
     let create_tbl = r#"
@@ -56,9 +81,12 @@ pub async fn run(bind_addr: &str) -> std::io::Result<()> {
             created_at TEXT NOT NULL
         );
     "#;
-    db.execute(Statement::from_string(DbBackend::Sqlite, create_tbl.to_owned()))
-        .await
-        .expect("Failed to create users table");
+    db.execute(Statement::from_string(
+        DbBackend::Sqlite,
+        create_tbl.to_owned(),
+    ))
+    .await
+    .expect("Failed to create users table");
     // Ensure projects table exists (for listing projects); include status and comments
     let create_projects = r#"
         CREATE TABLE IF NOT EXISTS projects (
@@ -73,22 +101,46 @@ pub async fn run(bind_addr: &str) -> std::io::Result<()> {
             last_active TEXT NOT NULL,
             lemmas_count INTEGER NOT NULL,
             status TEXT NOT NULL DEFAULT 'running',
-            comment TEXT NOT NULL DEFAULT ''
+            comment TEXT NOT NULL DEFAULT '',
+            error TEXT NOT NULL DEFAULT ''
         );
     "#;
-    db.execute(Statement::from_string(DbBackend::Sqlite, create_projects.to_owned()))
+    db.execute(Statement::from_string(
+        DbBackend::Sqlite,
+        create_projects.to_owned(),
+    ))
+    .await
+    .expect("Failed to create projects table");
+    // Backfill error column for older databases (ignore duplicate-column errors)
+    let ensure_error_column = "ALTER TABLE projects ADD COLUMN error TEXT NOT NULL DEFAULT ''";
+    if let Err(e) = db
+        .execute(Statement::from_string(
+            DbBackend::Sqlite,
+            ensure_error_column.to_owned(),
+        ))
         .await
-        .expect("Failed to create projects table");
-    HttpServer::new(move || {
-    // CORS config
-    let cors = Cors::default()
-        .allow_any_origin()
-        .allow_any_method()
-        .allow_any_header()
-        .max_age(3600);
+    {
+        if !e.to_string().contains("duplicate column name") {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to ensure error column: {}", e),
+            ));
+        }
+    }
+    if let Err(e) = cancel_running_projects(&db, "Server restarted before completion").await {
+        error!("Failed to mark unfinished projects as canceled: {}", e);
+    }
+    let db_pool = db.clone();
+    let server = HttpServer::new(move || {
+        // CORS config
+        let cors = Cors::default()
+            .allow_any_origin()
+            .allow_any_method()
+            .allow_any_header()
+            .max_age(3600);
 
         App::new()
-            .app_data(web::Data::new(db.clone()))
+            .app_data(web::Data::new(db_pool.clone()))
             .wrap(cors)
             // API routes under /api
             .service(
@@ -97,26 +149,63 @@ pub async fn run(bind_addr: &str) -> std::io::Result<()> {
                     .route("/login", web::post().to(handle_login))
                     .route("/logout", web::post().to(handle_logout))
                     .route("/me", web::get().to(handle_me))
-                   // Update invitation code for current user
+                    // Update invitation code for current user
                     .route("/me/invitation", web::post().to(handle_update_invitation))
-    // Create & manage research projects
-    .route("/project", web::post().to(handle_new_project))
-    .route("/project/{id}", web::get().to(handle_get_project))
-    .route("/project/{id}", web::delete().to(handle_delete_project))
-    // Update project comment/notes
-    .route("/project/{id}/comment", web::post().to(handle_update_comment))
-                    .route("/projects", web::get().to(handle_list_projects))
+                    // Create & manage research projects
+                    .route("/project", web::post().to(handle_new_project))
+                    .route("/project/{id}", web::get().to(handle_get_project))
+                    .route("/project/{id}", web::delete().to(handle_delete_project))
+                    // Update project comment/notes
+                    .route(
+                        "/project/{id}/comment",
+                        web::post().to(handle_update_comment),
+                    )
+                    .route("/projects", web::get().to(handle_list_projects)),
             )
             // Static assets for SPA (responds to GET/HEAD only)
-            .service(
-                Files::new("/", "./frontend/out")
-                    .index_file("index.html")
-            )
+            .service(Files::new("/", "./frontend/out").index_file("index.html"))
     })
     // bind to provided address (e.g., "0.0.0.0:port")
     .bind(bind_addr)?
-    .run()
-    .await
+    .run();
+
+    {
+        let shutdown_db = db.clone();
+        let handle = server.handle();
+        tokio::spawn(async move {
+            if let Err(e) = ctrl_c().await {
+                error!("Failed to listen for shutdown signal: {}", e);
+                return;
+            }
+            info!("Shutdown signal received (Ctrl+C). Canceling running projects.");
+            if let Err(e) = cancel_running_projects(&shutdown_db, "Server shutting down").await {
+                error!("Failed to cancel running projects: {}", e);
+            }
+            handle.stop(true).await;
+        });
+    }
+    #[cfg(unix)]
+    {
+        let shutdown_db = db.clone();
+        let handle = server.handle();
+        tokio::spawn(async move {
+            match unix_signal(SignalKind::terminate()) {
+                Ok(mut term) => {
+                    term.recv().await;
+                    info!("SIGTERM received. Canceling running projects.");
+                    if let Err(e) =
+                        cancel_running_projects(&shutdown_db, "Server shutting down").await
+                    {
+                        error!("Failed to cancel running projects: {}", e);
+                    }
+                    handle.stop(true).await;
+                }
+                Err(e) => error!("Failed to register SIGTERM handler: {}", e),
+            }
+        });
+    }
+
+    server.await
 }
 
 /// Login request payload
@@ -175,20 +264,36 @@ async fn handle_update_invitation(
     // Authenticate via Bearer token
     let auth_header = match req.headers().get("Authorization") {
         Some(v) => v.to_str().unwrap_or(""),
-        None => return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Missing Authorization header".into(), token: None }),
+        None => {
+            return HttpResponse::Unauthorized().json(ApiResponse {
+                success: false,
+                message: "Missing Authorization header".into(),
+                token: None,
+            });
+        }
     };
     if !auth_header.starts_with("Bearer ") {
-        return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Invalid Authorization header".into(), token: None });
+        return HttpResponse::Unauthorized().json(ApiResponse {
+            success: false,
+            message: "Invalid Authorization header".into(),
+            token: None,
+        });
     }
     let token = &auth_header[7..];
     let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "secret".into());
     let token_data = match decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret.as_ref()),
-        &Validation::new(Algorithm::HS256)
+        &Validation::new(Algorithm::HS256),
     ) {
         Ok(data) => data,
-        Err(_) => return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Invalid token".into(), token: None }),
+        Err(_) => {
+            return HttpResponse::Unauthorized().json(ApiResponse {
+                success: false,
+                message: "Invalid token".into(),
+                token: None,
+            });
+        }
     };
     let user_id = token_data.claims.sub;
     // Load existing user
@@ -198,25 +303,47 @@ async fn handle_update_invitation(
             let mut am = UserActiveModel::from(user);
             am.invitation_code = Set(Some(form.invitation_code.clone()));
             if let Err(e) = am.update(db.get_ref()).await {
-                return HttpResponse::InternalServerError().json(ApiResponse { success: false, message: format!("DB update error: {}", e), token: None });
+                return HttpResponse::InternalServerError().json(ApiResponse {
+                    success: false,
+                    message: format!("DB update error: {}", e),
+                    token: None,
+                });
             }
-            HttpResponse::Ok().json(ApiResponse { success: true, message: "Invitation code updated".into(), token: None })
+            HttpResponse::Ok().json(ApiResponse {
+                success: true,
+                message: "Invitation code updated".into(),
+                token: None,
+            })
         }
-        Ok(None) => HttpResponse::NotFound().json(ApiResponse { success: false, message: "User not found".into(), token: None }),
-        Err(e) => HttpResponse::InternalServerError().json(ApiResponse { success: false, message: format!("DB error: {}", e), token: None }),
+        Ok(None) => HttpResponse::NotFound().json(ApiResponse {
+            success: false,
+            message: "User not found".into(),
+            token: None,
+        }),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse {
+            success: false,
+            message: format!("DB error: {}", e),
+            token: None,
+        }),
     }
 }
 
 /// Handle user signup: insert new user via SeaORM
 async fn handle_signup(
     db: web::Data<DatabaseConnection>,
-    form: web::Json<SignupRequest>
+    form: web::Json<SignupRequest>,
 ) -> impl Responder {
     let req = form.into_inner();
     // Hash password
     let hashed = match hash(&req.password, DEFAULT_COST) {
         Ok(h) => h,
-        Err(_) => return HttpResponse::InternalServerError().json(ApiResponse { success: false, message: "Password hashing failed".into(), token: None }),
+        Err(_) => {
+            return HttpResponse::InternalServerError().json(ApiResponse {
+                success: false,
+                message: "Password hashing failed".into(),
+                token: None,
+            });
+        }
     };
     // Prepare ActiveModel
     let now = Utc::now();
@@ -232,15 +359,23 @@ async fn handle_signup(
     };
     // Insert
     match user.insert(db.get_ref()).await {
-        Ok(_) => HttpResponse::Ok().json(ApiResponse { success: true, message: "User created".into(), token: None }),
-        Err(e) => HttpResponse::BadRequest().json(ApiResponse { success: false, message: format!("Signup failed: {}", e), token: None }),
+        Ok(_) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "User created".into(),
+            token: None,
+        }),
+        Err(e) => HttpResponse::BadRequest().json(ApiResponse {
+            success: false,
+            message: format!("Signup failed: {}", e),
+            token: None,
+        }),
     }
 }
 
 /// Handle user login: verify credentials via SeaORM
 async fn handle_login(
     db: web::Data<DatabaseConnection>,
-    form: web::Json<LoginRequest>
+    form: web::Json<LoginRequest>,
 ) -> impl Responder {
     let req = form.into_inner();
     // Find user by email
@@ -265,33 +400,65 @@ async fn handle_login(
                         &Header::new(Algorithm::HS256),
                         &claims,
                         &EncodingKey::from_secret(secret.as_ref()),
-                    ).unwrap_or_default();
-                    HttpResponse::Ok().json(ApiResponse { success: true, message: "Login successful".into(), token: Some(token) })
+                    )
+                    .unwrap_or_default();
+                    HttpResponse::Ok().json(ApiResponse {
+                        success: true,
+                        message: "Login successful".into(),
+                        token: Some(token),
+                    })
                 }
-                _ => HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Invalid credentials".into(), token: None }),
+                _ => HttpResponse::Unauthorized().json(ApiResponse {
+                    success: false,
+                    message: "Invalid credentials".into(),
+                    token: None,
+                }),
             }
         }
-        Ok(None) => HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Invalid credentials".into(), token: None }),
-        Err(e) => HttpResponse::InternalServerError().json(ApiResponse { success: false, message: format!("DB error: {}", e), token: None }),
+        Ok(None) => HttpResponse::Unauthorized().json(ApiResponse {
+            success: false,
+            message: "Invalid credentials".into(),
+            token: None,
+        }),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse {
+            success: false,
+            message: format!("DB error: {}", e),
+            token: None,
+        }),
     }
 }
 /// Handle user logout: stateless JWT, simply acknowledge
 async fn handle_logout() -> impl Responder {
-    HttpResponse::Ok().json(ApiResponse { success: true, message: "Logged out".into(), token: None })
+    HttpResponse::Ok().json(ApiResponse {
+        success: true,
+        message: "Logged out".into(),
+        token: None,
+    })
 }
 
 /// Handle fetching current user info
-async fn handle_me(
-    db: web::Data<DatabaseConnection>,
-    req: HttpRequest
-) -> impl Responder {
+async fn handle_me(db: web::Data<DatabaseConnection>, req: HttpRequest) -> impl Responder {
     // Extract Bearer token
     let auth_header = match req.headers().get("Authorization") {
         Some(v) => v.to_str().unwrap_or(""),
-        None => return HttpResponse::Unauthorized().json(MeResponse { success: false, message: "Missing Authorization header".into(), full_name: None, role: None, credits: None }),
+        None => {
+            return HttpResponse::Unauthorized().json(MeResponse {
+                success: false,
+                message: "Missing Authorization header".into(),
+                full_name: None,
+                role: None,
+                credits: None,
+            });
+        }
     };
     if !auth_header.starts_with("Bearer ") {
-        return HttpResponse::Unauthorized().json(MeResponse { success: false, message: "Invalid Authorization header".into(), full_name: None, role: None, credits: None });
+        return HttpResponse::Unauthorized().json(MeResponse {
+            success: false,
+            message: "Invalid Authorization header".into(),
+            full_name: None,
+            role: None,
+            credits: None,
+        });
     }
     let token = &auth_header[7..];
     let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "secret".into());
@@ -299,16 +466,24 @@ async fn handle_me(
     let token_data = match decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret.as_ref()),
-        &Validation::new(Algorithm::HS256)
+        &Validation::new(Algorithm::HS256),
     ) {
         Ok(data) => data,
-        Err(_) => return HttpResponse::Unauthorized().json(MeResponse { success: false, message: "Invalid token".into(), full_name: None, role: None, credits: None }),
+        Err(_) => {
+            return HttpResponse::Unauthorized().json(MeResponse {
+                success: false,
+                message: "Invalid token".into(),
+                full_name: None,
+                role: None,
+                credits: None,
+            });
+        }
     };
     // Load user
     let user_id = token_data.claims.sub;
     match User::find_by_id(user_id).one(db.get_ref()).await {
         Ok(Some(user)) => {
-            if let Err(e) =  dotenv() {
+            if let Err(e) = dotenv() {
                 error!("Error occured when loading .env file: {}", e);
                 panic!();
             }
@@ -331,8 +506,11 @@ async fn handle_me(
             } else if is_invited {
                 // invited: max 7 per day
                 let sql = format!(
-                    "SELECT COUNT(*) AS cnt FROM projects WHERE user_id={} AND date(created_at)=date('now')", user_id);
-                let used: i64 = db.get_ref()
+                    "SELECT COUNT(*) AS cnt FROM projects WHERE user_id={} AND date(created_at)=date('now')",
+                    user_id
+                );
+                let used: i64 = db
+                    .get_ref()
                     .query_one(Statement::from_string(DbBackend::Sqlite, sql))
                     .await
                     .ok()
@@ -343,8 +521,12 @@ async fn handle_me(
                 format!("{}/7", remaining)
             } else {
                 // normal: max 2 total
-                let sql = format!("SELECT COUNT(*) AS cnt FROM projects WHERE user_id={} ", user_id);
-                let used: i64 = db.get_ref()
+                let sql = format!(
+                    "SELECT COUNT(*) AS cnt FROM projects WHERE user_id={} ",
+                    user_id
+                );
+                let used: i64 = db
+                    .get_ref()
                     .query_one(Statement::from_string(DbBackend::Sqlite, sql))
                     .await
                     .ok()
@@ -354,10 +536,28 @@ async fn handle_me(
                 let remaining = (2 - used).max(0);
                 format!("{}/2", remaining)
             };
-            HttpResponse::Ok().json(MeResponse { success: true, message: "OK".into(), full_name: Some(user.full_name), role: Some(role.into()), credits: Some(credits), })
+            HttpResponse::Ok().json(MeResponse {
+                success: true,
+                message: "OK".into(),
+                full_name: Some(user.full_name),
+                role: Some(role.into()),
+                credits: Some(credits),
+            })
         }
-        Ok(None) => HttpResponse::Unauthorized().json(MeResponse { success: false, message: "User not found".into(), full_name: None, role: None, credits: None }),
-        Err(e) => HttpResponse::InternalServerError().json(MeResponse { success: false, message: format!("DB error: {}", e), full_name: None, role: None, credits: None }),
+        Ok(None) => HttpResponse::Unauthorized().json(MeResponse {
+            success: false,
+            message: "User not found".into(),
+            full_name: None,
+            role: None,
+            credits: None,
+        }),
+        Err(e) => HttpResponse::InternalServerError().json(MeResponse {
+            success: false,
+            message: format!("DB error: {}", e),
+            full_name: None,
+            role: None,
+            credits: None,
+        }),
     }
 }
 /// Request payload for creating a new research project
@@ -380,7 +580,9 @@ struct NewProjectRequest {
     reasoning_effort: String,
 }
 
-fn default_reasoning_effort() -> String { "high".into() }
+fn default_reasoning_effort() -> String {
+    "high".into()
+}
 
 /// Handle creating a new research project: for now just log the received config
 /// Create & start a remote research session for the authenticated user
@@ -390,28 +592,48 @@ async fn handle_new_project(
     payload: web::Json<NewProjectRequest>,
 ) -> impl Responder {
     // Authenticate via Bearer JWT
-    let auth_header = req.headers().get("Authorization").and_then(|v| v.to_str().ok()).unwrap_or("");
+    let auth_header = req
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
     if !auth_header.starts_with("Bearer ") {
-        return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Missing or invalid Authorization header".into(), token: None });
+        return HttpResponse::Unauthorized().json(ApiResponse {
+            success: false,
+            message: "Missing or invalid Authorization header".into(),
+            token: None,
+        });
     }
     let token = &auth_header[7..];
     let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "secret".into());
     let claims = match decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret.as_ref()),
-        &Validation::new(Algorithm::HS256)
+        &Validation::new(Algorithm::HS256),
     ) {
         Ok(data) => data.claims,
-        Err(_) => return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Invalid token".into(), token: None }),
+        Err(_) => {
+            return HttpResponse::Unauthorized().json(ApiResponse {
+                success: false,
+                message: "Invalid token".into(),
+                token: None,
+            });
+        }
     };
     let user_id = claims.sub;
     // ----- enforce project creation limits -----
     // fetch user record
     let user = match User::find_by_id(user_id).one(db.get_ref()).await {
         Ok(Some(u)) => u,
-        _ => return HttpResponse::InternalServerError().json(ApiResponse { success: false, message: "User record not found".into(), token: None }),
+        _ => {
+            return HttpResponse::InternalServerError().json(ApiResponse {
+                success: false,
+                message: "User record not found".into(),
+                token: None,
+            });
+        }
     };
-    if let Err(e) =  dotenv() {
+    if let Err(e) = dotenv() {
         error!("Error occured when loading .env file: {}", e);
         panic!();
     }
@@ -425,20 +647,33 @@ async fn handle_new_project(
     };
     // check counts
     let mut limit_exceeded = false;
-        if !is_admin {
+    if !is_admin {
         if is_invited {
             // invited: max 7 projects per day
             let sql = format!(
-                "SELECT COUNT(*) AS cnt FROM projects WHERE user_id={} AND date(created_at)=date('now')", user_id);
-            if let Ok(Some(row)) = db.get_ref().query_one(Statement::from_string(DbBackend::Sqlite, sql)).await {
+                "SELECT COUNT(*) AS cnt FROM projects WHERE user_id={} AND date(created_at)=date('now')",
+                user_id
+            );
+            if let Ok(Some(row)) = db
+                .get_ref()
+                .query_one(Statement::from_string(DbBackend::Sqlite, sql))
+                .await
+            {
                 if let Ok(cnt) = row.try_get::<i64>("", "cnt") {
                     limit_exceeded = cnt >= 7;
                 }
             }
         } else {
             // normal: max 2 projects total
-            let sql = format!("SELECT COUNT(*) AS cnt FROM projects WHERE user_id={} ", user_id);
-            if let Ok(Some(row)) = db.get_ref().query_one(Statement::from_string(DbBackend::Sqlite, sql)).await {
+            let sql = format!(
+                "SELECT COUNT(*) AS cnt FROM projects WHERE user_id={} ",
+                user_id
+            );
+            if let Ok(Some(row)) = db
+                .get_ref()
+                .query_one(Statement::from_string(DbBackend::Sqlite, sql))
+                .await
+            {
                 if let Ok(cnt) = row.try_get::<i64>("", "cnt") {
                     limit_exceeded = cnt >= 2;
                 }
@@ -446,14 +681,19 @@ async fn handle_new_project(
         }
     }
     if limit_exceeded {
-        return HttpResponse::TooManyRequests().json(ApiResponse { success: false, message: "Project creation limit reached".into(), token: None });
+        return HttpResponse::TooManyRequests().json(ApiResponse {
+            success: false,
+            message: "Project creation limit reached".into(),
+            token: None,
+        });
     }
     // -------------------------------------------
     info!("Starting new remote session for user {}", user_id);
     // Build session config from request
     let req = payload.into_inner();
     // Log project config
-    info!("User {} project config: {{ problem: {}, context: {:?}, proof_model: {}, eval_model: {}, reform_model: {}, steps: {}, reviews: {}, iterations: {}, reformat: {}, theorem_graph: {}, reasoning_effort: {} }}",
+    info!(
+        "User {} project config: {{ problem: {}, context: {:?}, proof_model: {}, eval_model: {}, reform_model: {}, steps: {}, reviews: {}, iterations: {}, reformat: {}, theorem_graph: {}, reasoning_effort: {} }}",
         user_id,
         req.problem,
         req.context,
@@ -492,7 +732,11 @@ async fn handle_new_project(
         }
     });
     // Immediate response
-    HttpResponse::Ok().json(ApiResponse { success: true, message: "Project submitted and session started".into(), token: None })
+    HttpResponse::Ok().json(ApiResponse {
+        success: true,
+        message: "Project submitted and session started".into(),
+        token: None,
+    })
 }
 
 /// Structure returned for project listings
@@ -506,6 +750,7 @@ struct ProjectInfo {
     last_active: String,
     lemmas_count: i32,
     status: String,
+    error: String,
     creator: String,
 }
 
@@ -523,15 +768,33 @@ async fn handle_list_projects(
     req: HttpRequest,
     query: web::Query<ListProjectsQuery>,
 ) -> impl Responder {
-    let auth_header = req.headers().get("Authorization").and_then(|v| v.to_str().ok()).unwrap_or("");
+    let auth_header = req
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
     if !auth_header.starts_with("Bearer ") {
-        return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Missing or invalid Authorization header".into(), token: None });
+        return HttpResponse::Unauthorized().json(ApiResponse {
+            success: false,
+            message: "Missing or invalid Authorization header".into(),
+            token: None,
+        });
     }
     let token = &auth_header[7..];
     let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "secret".into());
-    let claims = match decode::<Claims>(token, &DecodingKey::from_secret(secret.as_ref()), &Validation::new(Algorithm::HS256)) {
+    let claims = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_ref()),
+        &Validation::new(Algorithm::HS256),
+    ) {
         Ok(data) => data.claims,
-        Err(_) => return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Invalid token".into(), token: None }),
+        Err(_) => {
+            return HttpResponse::Unauthorized().json(ApiResponse {
+                success: false,
+                message: "Invalid token".into(),
+                token: None,
+            });
+        }
     };
     let user_id = claims.sub;
     let user_email = claims.email.clone();
@@ -543,20 +806,24 @@ async fn handle_list_projects(
     // build SQL, join to users to get creator name
     let sql = if is_admin {
         format!(
-            "SELECT p.id, p.title, p.problem, p.context, p.created_at, p.last_active, p.lemmas_count, p.status, u.full_name AS creator \
+            "SELECT p.id, p.title, p.problem, p.context, p.created_at, p.last_active, p.lemmas_count, p.status, p.error, u.full_name AS creator \
              FROM projects p JOIN users u ON p.user_id = u.id \
              ORDER BY p.last_active DESC LIMIT {} OFFSET {}",
             limit, offset
         )
     } else {
         format!(
-            "SELECT p.id, p.title, p.problem, p.context, p.created_at, p.last_active, p.lemmas_count, p.status, u.full_name AS creator \
+            "SELECT p.id, p.title, p.problem, p.context, p.created_at, p.last_active, p.lemmas_count, p.status, p.error, u.full_name AS creator \
              FROM projects p JOIN users u ON p.user_id = u.id \
              WHERE p.user_id={} ORDER BY p.last_active DESC LIMIT {} OFFSET {}",
             user_id, limit, offset
         )
     };
-    match db.get_ref().query_all(Statement::from_string(DbBackend::Sqlite, sql)).await {
+    match db
+        .get_ref()
+        .query_all(Statement::from_string(DbBackend::Sqlite, sql))
+        .await
+    {
         Ok(rows) => {
             let mut list = Vec::new();
             for row in rows {
@@ -567,13 +834,31 @@ async fn handle_list_projects(
                 let created_at: String = row.try_get("", "created_at").unwrap_or_default();
                 let last_active: String = row.try_get("", "last_active").unwrap_or_default();
                 let lemmas_count: i32 = row.try_get("", "lemmas_count").unwrap_or_default();
-                let status: String = row.try_get("", "status").unwrap_or_else(|_| "running".to_string());
+                let status: String = row
+                    .try_get("", "status")
+                    .unwrap_or_else(|_| "running".to_string());
+                let error_msg: String = row.try_get("", "error").unwrap_or_default();
                 let creator: String = row.try_get("", "creator").unwrap_or_default();
-                list.push(ProjectInfo { id, title, problem, context, created_at, last_active, lemmas_count, status, creator });
+                list.push(ProjectInfo {
+                    id,
+                    title,
+                    problem,
+                    context,
+                    created_at,
+                    last_active,
+                    lemmas_count,
+                    status,
+                    error: error_msg,
+                    creator,
+                });
             }
             HttpResponse::Ok().json(list)
         }
-        Err(e) => HttpResponse::InternalServerError().json(ApiResponse { success: false, message: format!("Failed to fetch projects: {}", e), token: None }),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse {
+            success: false,
+            message: format!("Failed to fetch projects: {}", e),
+            token: None,
+        }),
     }
 }
 
@@ -602,15 +887,33 @@ async fn handle_get_project(
     path: Path<(i32,)>,
 ) -> impl Responder {
     // Authenticate
-    let auth_header = req.headers().get("Authorization").and_then(|v| v.to_str().ok()).unwrap_or("");
+    let auth_header = req
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
     if !auth_header.starts_with("Bearer ") {
-        return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Missing Authorization".into(), token: None });
+        return HttpResponse::Unauthorized().json(ApiResponse {
+            success: false,
+            message: "Missing Authorization".into(),
+            token: None,
+        });
     }
     let token = &auth_header[7..];
     let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "secret".into());
-    let claims = match decode::<Claims>(token, &DecodingKey::from_secret(secret.as_ref()), &Validation::new(Algorithm::HS256)) {
+    let claims = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_ref()),
+        &Validation::new(Algorithm::HS256),
+    ) {
         Ok(data) => data.claims,
-        Err(_) => return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Invalid token".into(), token: None }),
+        Err(_) => {
+            return HttpResponse::Unauthorized().json(ApiResponse {
+                success: false,
+                message: "Invalid token".into(),
+                token: None,
+            });
+        }
     };
     // Check if the user is an admin to allow access to all projects
     let user_id = claims.sub;
@@ -621,16 +924,20 @@ async fn handle_get_project(
     // Fetch project detail including comment
     let sql = if is_admin {
         format!(
-            "SELECT p.id, p.title, p.problem, p.context, p.memory, p.config, p.created_at, p.last_active, p.lemmas_count, p.status, p.comment, u.full_name AS creator FROM projects p JOIN users u ON p.user_id = u.id WHERE p.id={} LIMIT 1",
+            "SELECT p.id, p.title, p.problem, p.context, p.memory, p.config, p.created_at, p.last_active, p.lemmas_count, p.status, p.comment, p.error, u.full_name AS creator FROM projects p JOIN users u ON p.user_id = u.id WHERE p.id={} LIMIT 1",
             project_id
         )
     } else {
         format!(
-            "SELECT p.id, p.title, p.problem, p.context, p.memory, p.config, p.created_at, p.last_active, p.lemmas_count, p.status, p.comment, u.full_name AS creator FROM projects p JOIN users u ON p.user_id = u.id WHERE p.id={} AND p.user_id={} LIMIT 1",
+            "SELECT p.id, p.title, p.problem, p.context, p.memory, p.config, p.created_at, p.last_active, p.lemmas_count, p.status, p.comment, p.error, u.full_name AS creator FROM projects p JOIN users u ON p.user_id = u.id WHERE p.id={} AND p.user_id={} LIMIT 1",
             project_id, user_id
         )
     };
-    match db.get_ref().query_one(Statement::from_string(DbBackend::Sqlite, sql)).await {
+    match db
+        .get_ref()
+        .query_one(Statement::from_string(DbBackend::Sqlite, sql))
+        .await
+    {
         Ok(Some(row)) => {
             // Unpack project fields, including status
             let id: i32 = row.try_get("", "id").unwrap_or_default();
@@ -639,12 +946,16 @@ async fn handle_get_project(
             let context: Option<String> = row.try_get("", "context").ok().flatten();
             let mem_json: String = row.try_get("", "memory").unwrap_or_default();
             let config_json: String = row.try_get("", "config").unwrap_or_default();
-            let memory: Vec<MemoryBlockResponse> = serde_json::from_str(&mem_json).unwrap_or_default();
+            let memory: Vec<MemoryBlockResponse> =
+                serde_json::from_str(&mem_json).unwrap_or_default();
             let created_at: String = row.try_get("", "created_at").unwrap_or_default();
             let last_active: String = row.try_get("", "last_active").unwrap_or_default();
             let lemmas_count: i32 = row.try_get("", "lemmas_count").unwrap_or_default();
-            let status: String = row.try_get("", "status").unwrap_or_else(|_| "running".to_string());
+            let status: String = row
+                .try_get("", "status")
+                .unwrap_or_else(|_| "running".to_string());
             let comment: String = row.try_get("", "comment").unwrap_or_default();
+            let error_msg: String = row.try_get("", "error").unwrap_or_default();
             let creator: String = row.try_get("", "creator").unwrap_or_default();
             #[derive(Serialize)]
             struct ProjectDetail {
@@ -658,14 +969,37 @@ async fn handle_get_project(
                 lemmas_count: i32,
                 status: String,
                 comment: String,
+                error: String,
                 config: String,
                 creator: String,
             }
-            let detail = ProjectDetail { id, title, problem, context, memory, created_at, last_active, lemmas_count, status, comment, config: config_json, creator };
+            let detail = ProjectDetail {
+                id,
+                title,
+                problem,
+                context,
+                memory,
+                created_at,
+                last_active,
+                lemmas_count,
+                status,
+                comment,
+                error: error_msg,
+                config: config_json,
+                creator,
+            };
             HttpResponse::Ok().json(detail)
         }
-        Ok(None) => HttpResponse::NotFound().json(ApiResponse { success: false, message: "Project not found".into(), token: None }),
-        Err(e) => HttpResponse::InternalServerError().json(ApiResponse { success: false, message: format!("DB error: {}", e), token: None }),
+        Ok(None) => HttpResponse::NotFound().json(ApiResponse {
+            success: false,
+            message: "Project not found".into(),
+            token: None,
+        }),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse {
+            success: false,
+            message: format!("DB error: {}", e),
+            token: None,
+        }),
     }
 }
 
@@ -684,15 +1018,33 @@ async fn handle_update_comment(
     payload: web::Json<CommentRequest>,
 ) -> impl Responder {
     // Authenticate via Bearer JWT
-    let auth_header = req.headers().get("Authorization").and_then(|v| v.to_str().ok()).unwrap_or("");
+    let auth_header = req
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
     if !auth_header.starts_with("Bearer ") {
-        return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Missing or invalid Authorization header".into(), token: None });
+        return HttpResponse::Unauthorized().json(ApiResponse {
+            success: false,
+            message: "Missing or invalid Authorization header".into(),
+            token: None,
+        });
     }
     let token = &auth_header[7..];
     let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "secret".into());
-    let claims = match decode::<Claims>(token, &DecodingKey::from_secret(secret.as_ref()), &Validation::new(Algorithm::HS256)) {
+    let claims = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_ref()),
+        &Validation::new(Algorithm::HS256),
+    ) {
         Ok(data) => data.claims,
-        Err(_) => return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Invalid token".into(), token: None }),
+        Err(_) => {
+            return HttpResponse::Unauthorized().json(ApiResponse {
+                success: false,
+                message: "Invalid token".into(),
+                token: None,
+            });
+        }
     };
     let user_id = claims.sub;
     let project_id = path.into_inner().0;
@@ -707,13 +1059,22 @@ async fn handle_update_comment(
     } else {
         format!("id={} AND user_id={} ", project_id, user_id)
     };
-    let sql = format!(
-        "UPDATE projects SET comment='{}' WHERE {}",
-        comment, filter
-    );
-    match db.get_ref().execute(Statement::from_string(DbBackend::Sqlite, sql)).await {
-        Ok(_) => HttpResponse::Ok().json(ApiResponse { success: true, message: "Comment saved".into(), token: None }),
-        Err(e) => HttpResponse::InternalServerError().json(ApiResponse { success: false, message: format!("Failed to update comment: {}", e), token: None }),
+    let sql = format!("UPDATE projects SET comment='{}' WHERE {}", comment, filter);
+    match db
+        .get_ref()
+        .execute(Statement::from_string(DbBackend::Sqlite, sql))
+        .await
+    {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Comment saved".into(),
+            token: None,
+        }),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse {
+            success: false,
+            message: format!("Failed to update comment: {}", e),
+            token: None,
+        }),
     }
 }
 
@@ -724,15 +1085,33 @@ async fn handle_delete_project(
     path: Path<(i32,)>,
 ) -> impl Responder {
     // authenticate
-    let auth_header = req.headers().get("Authorization").and_then(|v| v.to_str().ok()).unwrap_or("");
+    let auth_header = req
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
     if !auth_header.starts_with("Bearer ") {
-        return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Missing Authorization".into(), token: None });
+        return HttpResponse::Unauthorized().json(ApiResponse {
+            success: false,
+            message: "Missing Authorization".into(),
+            token: None,
+        });
     }
     let token = &auth_header[7..];
     let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "secret".into());
-    let claims = match decode::<Claims>(token, &DecodingKey::from_secret(secret.as_ref()), &Validation::new(Algorithm::HS256)) {
+    let claims = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_ref()),
+        &Validation::new(Algorithm::HS256),
+    ) {
         Ok(data) => data.claims,
-        Err(_) => return HttpResponse::Unauthorized().json(ApiResponse { success: false, message: "Invalid token".into(), token: None }),
+        Err(_) => {
+            return HttpResponse::Unauthorized().json(ApiResponse {
+                success: false,
+                message: "Invalid token".into(),
+                token: None,
+            });
+        }
     };
     let user_id = claims.sub;
     let project_id = path.into_inner().0;
@@ -746,8 +1125,20 @@ async fn handle_delete_project(
         format!("id={} AND user_id={}", project_id, user_id)
     };
     let sql = format!("DELETE FROM projects WHERE {}", filter);
-    match db.get_ref().execute(Statement::from_string(DbBackend::Sqlite, sql)).await {
-        Ok(_) => HttpResponse::Ok().json(ApiResponse { success: true, message: "Project deleted".into(), token: None }),
-        Err(e) => HttpResponse::InternalServerError().json(ApiResponse { success: false, message: format!("Delete failed: {}", e), token: None }),
+    match db
+        .get_ref()
+        .execute(Statement::from_string(DbBackend::Sqlite, sql))
+        .await
+    {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Project deleted".into(),
+            token: None,
+        }),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse {
+            success: false,
+            message: format!("Delete failed: {}", e),
+            token: None,
+        }),
     }
 }
