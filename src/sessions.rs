@@ -3,9 +3,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::agents::{
-    Agent, Explorer, Formatter, Memory, MemoryBlock, ProofSummarizer, Refiner, Reviewer,
+    Agent, ContextGenerator, Explorer, Formatter, Memory, MemoryBlock, ProofSummarizer, Refiner,
+    Reviewer,
 };
-use crate::utils::{extract_all_component, extract_component, find_box, search_bkg_deer_flow};
+use crate::utils::{extract_all_component, extract_component, find_box};
 use indicatif::{ProgressBar, ProgressStyle};
 use tokio::task::JoinSet;
 
@@ -170,17 +171,23 @@ impl ResearchSession {
     pub async fn load_context(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let context_path = self.config.logdir.as_path().join("context.md");
         if !context_path.exists() {
-            info!("No context provided to this problem, searching for related info via deer-flow.");
-            let context = search_bkg_deer_flow(&self.config.problem).await?;
-            info!("loaded problem context: {:?}", &context);
+            info!("No context provided to this problem. Generating context via LLM...");
+            let generator = ContextGenerator::new()
+                .model(&self.config.proof_model)
+                .problem(&self.config.problem)
+                .reasoning_effort(self.config.reasoning_effort.clone());
+            let context = generator._process().await?;
+            info!("Generated problem context length: {}", context.len());
+
+            // Save to file
+            fs::write(&context_path, &context)?;
+
             self.memory.update(
                 MemoryBlock::new()
                     .memtype("context")
                     .content(context)
                     .solved(true),
             );
-            // warn!("Problem context does not exist in session: {:#?}!", &context_path);
-            // info!("Running AIM without problem context.");
             return Ok(());
         }
         let context = fs::read_to_string(context_path)?;
@@ -388,30 +395,7 @@ impl ResearchSession {
         &mut self,
         db: &DatabaseConnection,
         project_filter: &str,
-        need_search: bool,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        if need_search {
-            let new_ctx = search_bkg_deer_flow(&self.config.problem).await?;
-            self.update_memory_graph(
-                MemoryBlock::new()
-                    .memtype("context")
-                    .content(&new_ctx)
-                    .solved(true),
-            );
-            let mem_json = serde_json::to_string(&self.memory.memory)?;
-            let now = Utc::now().to_rfc3339().replace("'", "''");
-            let ctx_sql = new_ctx.replace("'", "''");
-            let upd_sql = format!(
-                "UPDATE projects SET context='{}', memory='{}', last_active='{}' WHERE {}",
-                ctx_sql,
-                mem_json.replace("'", "''"),
-                now,
-                project_filter,
-            );
-            db.execute(Statement::from_string(DbBackend::Sqlite, upd_sql))
-                .await?;
-        }
-
         let mut solved_flag = false;
         for _ in 0..self.config.steps {
             let done = if self.config.theorem_graph_mode {
@@ -810,25 +794,23 @@ impl Session for ResearchSession {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Set up problem and initial context/memory
         self.explorer.set_problem(self.config.problem.clone());
-        // Prepare timestamp and initial record
-        let ts = Utc::now().to_rfc3339().replace("'", "''");
-        let cfg_json = serde_json::to_string(&self.config)?;
-        let init_mem = serde_json::to_string(&self.memory)?;
-        // Determine if we need to fetch context via deer-flow
-        let ctx = self
+
+        // Determine if context exists
+        let existing_ctx = self
             .memory
             .memory
             .iter()
             .find(|m| m.memtype == "context")
-            .map(|m| m.content.clone())
-            .unwrap_or_default();
-        let need_search = ctx.is_empty();
-        // Insert placeholder for initial project record
-        let ctx_for_insert = if need_search {
-            String::from("Researching via deer-flow...")
-        } else {
-            ctx.clone()
-        };
+            .map(|m| m.content.clone());
+
+        let need_gen = existing_ctx.is_none();
+        let ctx_for_insert = existing_ctx.unwrap_or_else(|| "Generating context...".to_string());
+
+        // Prepare timestamp and initial record
+        let ts = Utc::now().to_rfc3339().replace("'", "''");
+        let cfg_json = serde_json::to_string(&self.config)?;
+        let init_mem = serde_json::to_string(&self.memory)?;
+
         let title = self.config.title.replace("'", "''");
         // initial lemma count from memory blocks
         let init_lemmas = self
@@ -837,6 +819,7 @@ impl Session for ResearchSession {
             .iter()
             .filter(|m| m.memtype == "lemma")
             .count() as i32;
+
         let insert_sql = format!(
             "INSERT INTO projects (user_id, title, problem, context, config, memory, created_at, last_active, lemmas_count, status) VALUES ({}, '{}', '{}', '{}', '{}', '{}', '{}', '{}', {}, 'running')",
             user_id,
@@ -851,10 +834,37 @@ impl Session for ResearchSession {
         );
         db.execute(Statement::from_string(DbBackend::Sqlite, insert_sql))
             .await?;
+
         let project_filter = format!("user_id={} AND created_at='{}'", user_id, ts);
-        let run_result = self
-            .drive_remote_pipeline(db, &project_filter, need_search)
-            .await;
+
+        // If context was missing, generate it now and update DB
+        if need_gen {
+            info!("No context provided. Generating context via LLM for remote session...");
+            let generator = ContextGenerator::new()
+                .model(&self.config.proof_model)
+                .problem(&self.config.problem)
+                .reasoning_effort(self.config.reasoning_effort.clone());
+            let context = generator._process().await?;
+            self.memory.update(
+                MemoryBlock::new()
+                    .memtype("context")
+                    .content(&context)
+                    .solved(true),
+            );
+
+            // Update DB with real context and updated memory
+            let updated_mem = serde_json::to_string(&self.memory)?;
+            let upd_sql = format!(
+                "UPDATE projects SET context='{}', memory='{}' WHERE {}",
+                context.replace("'", "''"),
+                updated_mem.replace("'", "''"),
+                project_filter
+            );
+            db.execute(Statement::from_string(DbBackend::Sqlite, upd_sql))
+                .await?;
+        }
+
+        let run_result = self.drive_remote_pipeline(db, &project_filter).await;
         match run_result {
             Ok(solved_flag) => {
                 let status = if solved_flag { "solved" } else { "ended" };
@@ -888,3 +898,4 @@ impl Session for ResearchSession {
         }
     }
 }
+

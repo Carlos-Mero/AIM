@@ -78,25 +78,11 @@ AIM supports both a single-session CLI workflow and a long-running server mode f
    echo "NEXT_PUBLIC_API_BASE_URL=http://localhost:4000" > .env.local
    npm run dev
    ```
-   Open http://localhost:3000 to start new sessions, visualize theorem graphs, explore proofs, and view logs. You can also run `npm run build` under the frontend folder. This will build up static frontend files of this project. The `aim` executable already equipped with static file serving capability. Then you can directly visiting localhost:4000 when `aim --server` is running.
-
-#### Deer-Flow Integration
-
-We also include support using [deer-flow](https://github.com/bytedance/deer-flow) to research for context of the given problem. With this feature we can simply start a research session with a given problem. deer-flow will first search for previous papers to obtain existing findings and methods around the given problem.
-
-To set up this feature you should firstly make sure you have installed [uv](https://docs.astral.sh/uv/) as the python virtual environment manager in your system. After that, please run these commands to initialize deer-flow under the root folder of AIM:
-
-```sh
-git submodule init
-git submodule update
-```
-
-After that you can enter `deer-flow` folder and follow the steps of official [README.md](https://github.com/bytedance/deer-flow) to set up its workflow, until you can successfully run `uv run main.py` and obtain the desired output. Then you can simply run `aim` without providing the context and it will automatically search for that for you via deer-flow.
-
-### Command-Line Options
-Run `aim --help` for full details. Common flags include:
-
-### Session Persistence & Logs
+       Open http://localhost:3000 to start new sessions, visualize theorem graphs, explore proofs, and view logs. You can also run `npm run build` under the frontend folder. This will build up static frontend files of this project. The `aim` executable already equipped with static file serving capability. Then you can directly visiting localhost:4000 when `aim --server` is running.
+   
+   ### Command-Line Options
+   Run `aim --help` for full details. Common flags include:
+   ### Session Persistence & Logs
 - Intermediate state and memory are stored in `aim.db` in your project folder—use `--resume` to continue an interrupted run.
 - Step-by-step logs are written under `logs/` within the session directory.
 

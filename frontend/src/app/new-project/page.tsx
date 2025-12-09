@@ -12,8 +12,6 @@ export default function NewProjectPage() {
   const { t } = useI18n();
   const [title, setTitle] = useState<string>('');
   const [problem, setProblem] = useState<string>('');
-  // Mode: 'standard' requires both problem and context; 'deer-flow' sends empty context
-  const [mode, setMode] = useState<'standard' | 'deer-flow'>('deer-flow');
   const [context, setContext] = useState<string>('');
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
   // Advanced parameters matching ResearchSessionConfig
@@ -29,12 +27,10 @@ export default function NewProjectPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // send empty context in 'deer-flow' mode
-    const contextToSend = mode === 'standard' ? context : '';
     const config = {
       title,
       problem,
-      context: contextToSend,
+      context,
       proofModel,
       evalModel,
       reformModel,
@@ -76,32 +72,6 @@ export default function NewProjectPage() {
           </header>
           <div className="px-8 py-6 space-y-6">
           <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Mode switch: standard vs deer-flow */}
-            <div className="flex items-center space-x-4">
-              <span className="font-medium text-gray-700">{t('mode_label')}</span>
-              <button
-                type="button"
-                onClick={() => setMode('standard')}
-                className={`px-3 py-1 rounded ${
-                  mode === 'standard'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-200 text-gray-700'
-                }`}
-              >
-                {t('mode_standard')}
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode('deer-flow')}
-                className={`px-3 py-1 rounded ${
-                  mode === 'deer-flow'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-200 text-gray-700'
-                }`}
-              >
-                {t('mode_deer_flow')}
-              </button>
-            </div>
           <div>
             <label htmlFor="title" className="block text-xl font-bold text-gray-900 mb-2">
               {t('title_label')}
@@ -130,8 +100,6 @@ export default function NewProjectPage() {
               placeholder={t('problem_placeholder')}
             />
           </div>
-          {/* Context input only in standard mode */}
-          {mode === 'standard' && (
             <div>
               <label htmlFor="context" className="block text-xl font-bold text-gray-900 mb-2">
                 {t('context_label')}
@@ -140,13 +108,11 @@ export default function NewProjectPage() {
                 id="context"
                 value={context}
                 onChange={e => setContext(e.target.value)}
-                required
                 rows={6}
                 className="w-full border border-gray-300 rounded-md p-2 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder={t('context_placeholder')}
               />
             </div>
-          )}
           <div>
             <button
               type="button"

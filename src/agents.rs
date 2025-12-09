@@ -826,6 +826,62 @@ impl Agent for Formatter {
     }
 }
 
+pub struct ContextGenerator {
+    client: LMClient,
+    model: String,
+    problem: String,
+    reasoning_effort: String,
+}
+
+impl ContextGenerator {
+    pub fn new() -> Self {
+        ContextGenerator {
+            client: LMClient::new(),
+            model: String::new(),
+            problem: String::new(),
+            reasoning_effort: "medium".into(),
+        }
+    }
+    pub fn model(mut self, model: impl Into<String>) -> Self {
+        self.model = model.into();
+        self
+    }
+    pub fn problem(mut self, problem: impl Into<String>) -> Self {
+        self.problem = problem.into();
+        self
+    }
+    pub fn reasoning_effort(mut self, effort: impl Into<String>) -> Self {
+        self.reasoning_effort = effort.into();
+        self
+    }
+}
+
+#[async_trait::async_trait]
+impl Agent for ContextGenerator {
+    async fn _process(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let prompt = concat!(
+            "You are an expert in mathematics. I will provide you with a research problem.\n",
+            "Your task is to provide a brief background introduction and context for this problem.\n",
+            "This should include:\n",
+            "1. Definitions of key mathematical objects and symbols used in the problem.\n",
+            "2. Relevant theorems or known results that are closely related to this problem.\n",
+            "3. Any standard techniques or methods often used in this domain.\n",
+            "\n",
+            "Please keep the response informative, accurate, and relevant to the problem.\n",
+            "Format the output in standard Markdown with LaTeX math support.\n",
+            "\n",
+            "The problem is:\n"
+        )
+        .to_string()
+            + &format!("\\begin{{problem}}{}\\end{{problem}}", self.problem);
+
+        return self
+            .client
+            .comp(&prompt, &self.model, false, &self.reasoning_effort)
+            .await;
+    }
+}
+
 pub struct ProofSummarizer {
     client: LMClient,
     model: String,
