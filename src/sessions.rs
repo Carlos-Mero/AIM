@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::agents::{
-    Agent, ContextGenerator, Explorer, Formatter, Memory, MemoryBlock, ProofSummarizer, Refiner,
-    Reviewer,
+    Agent, ContextGenerator, Explorer, Formatter, Memory, MemoryBlock, ProgressiveReviewer,
+    ProofSummarizer, Refiner, SimpleReviewer,
 };
 use crate::utils::{extract_all_component, extract_component, find_box};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -28,14 +28,16 @@ pub trait Session: Send {
 }
 
 const MAX_REVIEWS_PER_NODE: u8 = 24;
+const MAX_PROGRESSIVE_REVIEWS_PER_NODE: u8 = 63;
 
-#[derive(Default, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ResearchSessionConfig {
     title: String,
     logdir: PathBuf,
     proof_model: String,
     eval_model: String,
     reform_model: String,
+    reviewer: String,
     steps: u32,
     reviews: u8,
     iterations: u8,
@@ -47,6 +49,29 @@ pub struct ResearchSessionConfig {
     streaming: bool,          // streaming output in exploration
     theorem_graph_mode: bool, // whether to use theorem graph mode
     reasoning_effort: String, // new field for reasoning_effort
+}
+impl Default for ResearchSessionConfig {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            logdir: PathBuf::new(),
+            proof_model: String::new(),
+            eval_model: String::new(),
+            reform_model: String::new(),
+            reviewer: "progressive".into(),
+            steps: 0,
+            reviews: 12,
+            iterations: 0,
+            currect_steps: 0,
+            problem: String::new(),
+            context: String::new(),
+            resume: false,
+            reformat: false,
+            streaming: false,
+            theorem_graph_mode: false,
+            reasoning_effort: String::new(),
+        }
+    }
 }
 
 impl ResearchSessionConfig {
@@ -67,6 +92,10 @@ impl ResearchSessionConfig {
     }
     pub fn reform_model(mut self, reform_model: impl Into<String>) -> Self {
         self.reform_model = reform_model.into();
+        self
+    }
+    pub fn reviewer(mut self, reviewer: impl Into<String>) -> Self {
+        self.reviewer = reviewer.into();
         self
     }
     pub fn logdir(mut self, logdir: impl Into<String>) -> Self {
@@ -126,10 +155,13 @@ impl ResearchSessionConfig {
     }
 }
 
+// ...
+
 pub struct ResearchSession {
     config: ResearchSessionConfig,
     explorer: Explorer,
-    reviewer: Reviewer,
+    simple_reviewer: SimpleReviewer,
+    progressive_reviewer: ProgressiveReviewer,
     refiner: Refiner,
     memory: Memory,
 }
@@ -141,10 +173,13 @@ impl ResearchSession {
             .model(&config.proof_model)
             .streaming(config.streaming)
             .reasoning_effort(config.reasoning_effort.clone());
-        let reviewer = Reviewer::new()
+        let simple_reviewer = SimpleReviewer::new()
             .model(&config.eval_model)
             .reviews(config.reviews)
             .streaming(config.streaming && (config.reviews == 1))
+            .reasoning_effort(config.reasoning_effort.clone());
+        let progressive_reviewer = ProgressiveReviewer::new()
+            .model(&config.eval_model)
             .reasoning_effort(config.reasoning_effort.clone());
         let refiner = Refiner::new()
             .model(&config.proof_model)
@@ -162,7 +197,8 @@ impl ResearchSession {
         ResearchSession {
             config: config,
             explorer: explorer,
-            reviewer: reviewer,
+            simple_reviewer: simple_reviewer,
+            progressive_reviewer: progressive_reviewer,
             refiner: refiner,
             memory: mem,
         }
@@ -222,29 +258,55 @@ impl ResearchSession {
         let mut tasks: JoinSet<Option<String>> = JoinSet::new();
         let mut res: Vec<Option<String>> = Vec::new();
         for i in ids {
-            let mut reviewer = Reviewer::new()
-                .model(&self.config.eval_model)
-                .reviews(self.config.reviews)
-                .streaming(false);
             let memblock = &self.memory.memory[*i];
             let comment = memblock.get_comment().to_string();
             let memtype = memblock.memtype.to_string();
             let num_reviews = memblock.get_reviews();
-            if let Some(context) = self.memory.format_deps(*i, false, false) {
-                reviewer.set_context(context);
+            let context = self.memory.format_deps(*i, false, false);
+            let conjecture = memblock.content.clone();
+            let proof = memblock.proof.clone();
+
+            if self.config.reviewer == "progressive" {
+                let mut reviewer = ProgressiveReviewer::new()
+                    .model(&self.config.eval_model)
+                    .reasoning_effort(self.config.reasoning_effort.clone());
+                if let Some(ctx) = context {
+                    reviewer.set_context(ctx);
+                }
+                reviewer.set_conjecture(conjecture);
+                reviewer.set_proof(proof);
+                let arc_reviewer = Arc::new(reviewer);
+                tasks.spawn(async move {
+                    if memtype == "context" || num_reviews >= MAX_PROGRESSIVE_REVIEWS_PER_NODE {
+                        return None;
+                    }
+                    if !comment.is_empty() {
+                        return Some(comment);
+                    }
+                    return arc_reviewer.verify().await;
+                });
+            } else {
+                let mut reviewer = SimpleReviewer::new()
+                    .model(&self.config.eval_model)
+                    .reviews(self.config.reviews)
+                    .streaming(false)
+                    .reasoning_effort(self.config.reasoning_effort.clone());
+                if let Some(ctx) = context {
+                    reviewer.set_context(ctx);
+                }
+                reviewer.set_conjecture(conjecture);
+                reviewer.set_proof(proof);
+                let arc_reviewer = Arc::new(reviewer);
+                tasks.spawn(async move {
+                    if memtype == "context" || num_reviews >= MAX_REVIEWS_PER_NODE {
+                        return None;
+                    }
+                    if !comment.is_empty() {
+                        return Some(comment);
+                    }
+                    return arc_reviewer.pverify().await;
+                });
             }
-            reviewer.set_conjecture(&memblock.content);
-            reviewer.set_proof(&memblock.proof);
-            let arc_reviewer = Arc::new(reviewer);
-            tasks.spawn(async move {
-                if memtype == "context" || num_reviews >= MAX_REVIEWS_PER_NODE {
-                    return None;
-                }
-                if !comment.is_empty() {
-                    return Some(comment);
-                }
-                return arc_reviewer.pverify().await;
-            });
         }
         while let Some(task_result) = tasks.join_next().await {
             match task_result {
@@ -379,7 +441,8 @@ impl ResearchSession {
         self.memory.update(nmemory);
         if let Some(context) = self.memory.format_all_with_proof_summary(true) {
             self.explorer.set_context(&context);
-            self.reviewer.set_context(&context);
+            self.simple_reviewer.set_context(&context);
+            self.progressive_reviewer.set_context(&context);
             self.refiner.set_context(&context);
         }
     }
@@ -576,9 +639,10 @@ impl ResearchSession {
                     .content(&conj)
                     .proof(&proof)
                     .deps(serde_json::from_str::<Vec<usize>>(&deps).unwrap_or_default())
-                    .solved(false)
+                    .solved(true)
                     .reviews(0),
             );
+            return Ok(false);
         } else {
             info!("Collected the final proof of this problem.");
             self.update_memory_graph(
@@ -590,24 +654,24 @@ impl ResearchSession {
                     .solved(false)
                     .reviews(0),
             );
-        }
-        let memid = self.memory.memory.len() - 1;
-        for i in 0..self.config.iterations + 1 {
-            info!("Starting the {}-th iteration", i);
-            if self.backtrace_review_from(memid).await? {
-                info!("backtrace review ended and the proof path is correct.");
-                break;
-            } else if i < self.config.iterations {
-                info!("Some flaws were found in this proof path");
-                self.backtrace_refine_from(memid).await?;
+            let memid = self.memory.memory.len() - 1;
+            for i in 0..self.config.iterations + 1 {
+                info!("Starting the {}-th iteration", i);
+                if self.backtrace_review_from(memid).await? {
+                    info!("backtrace review ended and the proof path is correct.");
+                    break;
+                } else if i < self.config.iterations {
+                    info!("Some flaws were found in this proof path");
+                    self.backtrace_refine_from(memid).await?;
+                }
             }
-        }
 
-        if self.memory.memory[memid].is_solved()
-            && self.memory.memory[memid].memtype == "theorem"
-            && self.memory.memory[memid].content == self.config.problem
-        {
-            return Ok(true);
+            if self.memory.memory[memid].is_solved()
+                && self.memory.memory[memid].memtype == "theorem"
+                && self.memory.memory[memid].content == self.config.problem
+            {
+                return Ok(true);
+            }
         }
         return Ok(false);
     }
@@ -644,10 +708,18 @@ impl ResearchSession {
         {
             info!("Start verifying a conjecture");
             for i in 0..self.config.iterations {
-                self.reviewer.set_conjecture(&*conj);
-                self.reviewer.set_proof(&*proof);
-                let arc_reviewer = Arc::new(self.reviewer.clone());
-                if let Some(review) = arc_reviewer.pverify().await {
+                let review = if self.config.reviewer == "progressive" {
+                    self.progressive_reviewer.set_conjecture(&*conj);
+                    self.progressive_reviewer.set_proof(&*proof);
+                    self.progressive_reviewer.verify().await
+                } else {
+                    self.simple_reviewer.set_conjecture(&*conj);
+                    self.simple_reviewer.set_proof(&*proof);
+                    let arc_reviewer = Arc::new(self.simple_reviewer.clone());
+                    arc_reviewer.pverify().await
+                };
+
+                if let Some(r) = review {
                     // Directly end this exploration step when one conjecture fails after several
                     // iterations
                     if i == self.config.iterations - 1 {
@@ -657,7 +729,7 @@ impl ResearchSession {
                     info!("A flaw was found in the proof, trying to refine.");
                     self.refiner.set_conjecture(&*conj);
                     self.refiner.set_proof(&*proof);
-                    self.refiner.set_review(review);
+                    self.refiner.set_review(r);
                     let raw_refinement = self.refiner._process().await?;
                     if let Some(judgement) = find_box(&raw_refinement) {
                         if judgement == "false" {
@@ -690,16 +762,25 @@ impl ResearchSession {
         if let Some(mut final_proof) = extract_component(&raw_exploration, "final_proof") {
             info!("Start verifing the final proof");
             for i in 0..self.config.iterations {
-                self.reviewer.set_conjecture(&self.config.problem);
-                self.reviewer.set_proof(&final_proof);
-                let arc_reviewer = Arc::new(self.reviewer.clone());
-                if let Some(review) = arc_reviewer.pverify().await {
+                let review = if self.config.reviewer == "progressive" {
+                    self.progressive_reviewer
+                        .set_conjecture(&self.config.problem);
+                    self.progressive_reviewer.set_proof(&final_proof);
+                    self.progressive_reviewer.verify().await
+                } else {
+                    self.simple_reviewer.set_conjecture(&self.config.problem);
+                    self.simple_reviewer.set_proof(&final_proof);
+                    let arc_reviewer = Arc::new(self.simple_reviewer.clone());
+                    arc_reviewer.pverify().await
+                };
+
+                if let Some(r) = review {
                     if i == self.config.iterations - 1 {
                         return Ok(false);
                     }
                     self.refiner.set_conjecture(&self.config.problem);
                     self.refiner.set_proof(&final_proof);
-                    self.refiner.set_review(review);
+                    self.refiner.set_review(r);
                     let raw_refinement = self.refiner._process().await?;
                     if let Some(n_proof) = extract_component(&raw_refinement, "proof") {
                         final_proof = n_proof;

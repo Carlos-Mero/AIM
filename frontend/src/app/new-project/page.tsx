@@ -18,9 +18,10 @@ export default function NewProjectPage() {
   const [proofModel, setProofModel] = useState<string>('gpt-5');
   const [evalModel, setEvalModel] = useState<string>('gpt-5');
   const [reformModel, setReformModel] = useState<string>('gpt-5');
+  const [reviewer, setReviewer] = useState<string>('progressive');
   const [reasoningEffort, setReasoningEffort] = useState<'minimal'|'low'|'medium'|'high'>('high');
   const [steps, setSteps] = useState<number>(24);
-  const [reviews, setReviews] = useState<number>(3);
+  const [reviews, setReviews] = useState<number>(12);
   const [iterations, setIterations] = useState<number>(4);
   const [reformat, setReformat] = useState<boolean>(true);
   const [theoremGraph, setTheoremGraph] = useState<boolean>(true);
@@ -34,6 +35,7 @@ export default function NewProjectPage() {
       proofModel,
       evalModel,
       reformModel,
+      reviewer,
       reasoningEffort,
       steps,
       reviews,
@@ -163,6 +165,17 @@ export default function NewProjectPage() {
                   </select>
                 </div>
                 <div>
+                  <label className="block text-sm text-gray-700">Reviewer Type</label>
+                  <select
+                    value={reviewer}
+                    onChange={e => setReviewer(e.target.value)}
+                    className="w-full border rounded p-1 bg-gray-50 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="simple">Simple</option>
+                    <option value="progressive">Progressive</option>
+                  </select>
+                </div>
+                <div>
                   <label className="block text-sm text-gray-700">{t('steps_label')}</label>
                   <input
                     type="number"
@@ -172,6 +185,7 @@ export default function NewProjectPage() {
                     className="w-full border rounded p-1 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
+                {reviewer === 'simple' && (
                 <div>
                   <label className="block text-sm text-gray-700">{t('reviews_label')}</label>
                   <input
@@ -182,6 +196,7 @@ export default function NewProjectPage() {
                     className="w-full border border-gray-300 rounded p-1 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
+                )}
                 <div>
                   <label className="block text-sm text-gray-700">{t('iterations_label')}</label>
                   <input

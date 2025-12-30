@@ -557,7 +557,7 @@ impl Agent for Explorer {
 }
 
 #[derive(Clone)]
-pub struct Reviewer {
+pub struct SimpleReviewer {
     client: LMClient,
     model: String,
     conjecture: String,
@@ -568,9 +568,9 @@ pub struct Reviewer {
     reasoning_effort: String,
 }
 
-impl Reviewer {
+impl SimpleReviewer {
     pub fn new() -> Self {
-        Reviewer {
+        SimpleReviewer {
             client: LMClient::new(),
             model: String::new(),
             conjecture: String::new(),
@@ -659,7 +659,7 @@ impl Reviewer {
 }
 
 #[async_trait::async_trait]
-impl Agent for Reviewer {
+impl Agent for SimpleReviewer {
     async fn _process(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let conjecture_proof = format!(
             "### Conjecture\n\n{}\n\n### Proof\n\n{}",
@@ -689,6 +689,221 @@ impl Agent for Reviewer {
             .client
             .comp(&prompt, &self.model, self.streaming, &self.reasoning_effort)
             .await;
+    }
+}
+
+fn extract_xml_content(text: &str, tag: &str) -> Option<String> {
+    let open_tag = format!("<{}", tag);
+    let close_tag = format!("</{}", tag);
+    if let Some(start) = text.find(&open_tag) {
+        if let Some(end) = text.find(&close_tag) {
+            if start + open_tag.len() < end {
+                return Some(text[start + open_tag.len()..end].trim().to_string());
+            }
+        }
+    }
+    None
+}
+
+#[derive(Clone)]
+pub struct ProgressiveReviewer {
+    client: LMClient,
+    model: String,
+    conjecture: String,
+    proof: String,
+    context: Option<String>,
+    reasoning_effort: String,
+    max_iters: usize,
+    min_chunk_size: usize,
+}
+
+impl ProgressiveReviewer {
+    pub fn new() -> Self {
+        ProgressiveReviewer {
+            client: LMClient::new(),
+            model: String::new(),
+            conjecture: String::new(),
+            proof: String::new(),
+            context: None,
+            reasoning_effort: "medium".into(),
+            max_iters: 4,
+            min_chunk_size: 4,
+        }
+    }
+    pub fn model(mut self, model: impl Into<String>) -> Self {
+        self.model = model.into();
+        self
+    }
+    pub fn set_conjecture(&mut self, conjecture: impl Into<String>) -> &Self {
+        self.conjecture = conjecture.into();
+        self
+    }
+    pub fn set_proof(&mut self, proof: impl Into<String>) -> &Self {
+        self.proof = proof.into();
+        self
+    }
+    pub fn set_context(&mut self, context: impl Into<String>) -> &Self {
+        self.context = Some(context.into());
+        self
+    }
+    pub fn reasoning_effort(mut self, effort: impl Into<String>) -> Self {
+        self.reasoning_effort = effort.into();
+        self
+    }
+
+    fn split_into_chunks(proof: &str, chunk_length: usize) -> Vec<String> {
+        let lines: Vec<&str> = proof.lines().collect();
+        if lines.is_empty() {
+            return vec![proof.to_string()];
+        }
+        lines
+            .chunks(chunk_length)
+            .map(|chunk| chunk.join("\n"))
+            .collect()
+    }
+
+    fn chunk_length_for_iteration(&self, proof: &str, iteration: usize) -> usize {
+        let lines: Vec<&str> = proof.lines().collect();
+        let num_lines = lines.len();
+        if num_lines == 0 {
+            return self.min_chunk_size;
+        }
+        if iteration == 0 {
+            return num_lines.max(self.min_chunk_size);
+        }
+        let target_chunks = 1usize.max(2usize.pow(iteration as u32));
+        let approx_length = (num_lines + target_chunks - 1) / target_chunks;
+        self.min_chunk_size.max(approx_length)
+    }
+
+    pub async fn verify(&self) -> Option<String> {
+        info!(
+            "Starting progressive verification (max_iters={})",
+            self.max_iters
+        );
+
+        let mut context_prefix = String::new();
+        if let Some(context) = &self.context {
+            context_prefix = format!(
+                "\n\n### Context and History Explorations\n\nHere is a list of context that we have collected for this problem or our history findings during exploration. They serve as the background of the conjecture and proof and can be accepted without controversy as correct.\n\n{}",
+                context
+            );
+        }
+
+        for iteration in 0..self.max_iters {
+            let chunk_length = self.chunk_length_for_iteration(&self.proof, iteration);
+            let chunks = Self::split_into_chunks(&self.proof, chunk_length);
+            let num_chunks = chunks.len();
+
+            info!(
+                "Iteration {}: Verifying {} chunks (len approx {})",
+                iteration, num_chunks, chunk_length
+            );
+
+            let mut tasks = JoinSet::new();
+
+            for (idx, chunk) in chunks.into_iter().enumerate() {
+                let chunk_id = idx + 1;
+                let client = self.client.clone();
+                let model = self.model.clone();
+                let reasoning_effort = self.reasoning_effort.clone();
+                let conjecture = self.conjecture.clone();
+                let full_proof = self.proof.clone();
+                let context_section = context_prefix.clone();
+
+                let prompt = if iteration == 0 {
+                    // Standard prompt for whole proof
+                    format!(concat!(
+                        "You are an assistant highly proficient in mathematics. The user will provide a math problem together with its proposed solution, and your task is to verify the correctness of that solution according to the given instruction.\n",
+                        "Here is a math problem and a candidate solution of it, and you need to verify the correctness of this solution. Please check each of the following:\n\n",
+                        "1. The provided content is indeed a math problem and its corresponding solution, rather than unrelated material supplied by mistake.\n",
+                        "2. The solution actually derives the conclusion required by the original problem.\n",
+                        "3. Every step of calculation and formula derivation in the solution is correct.\n",
+                        "4. The hypotheses (conditions) and conclusions of any theorems used are correctly matched and applied.\n",
+                        "5. The solution relies only on the conditions given in the problem and does not introduce any additional assumptions to obtain the conclusion.\n\n",
+                        "Consistency and error-severity policy (important):\n",
+                        "- If only minor, easily fixable issues exist (e.g., small algebraic slips later corrected, notational typos, superficial formatting), treat the solution as correct overall but briefly note such issues.\n",
+                        "- If there is any critical error that undermines correctness (e.g., invalid step, wrong theorem usage without required conditions, uncorrected calculation error leading to a wrong result), treat the solution as incorrect.\n\n",
+                        "Response requirements: If the solution is correct overall (possibly with minor issues), reply with `<verification>true</verification>` and briefly list minor issues if any.",
+                        " If the solution is incorrect, reply with `<verification>false</verification>` followed by a concise description of the most harmful error.",
+                        " Do not include any restatement of the entire solution or problem.\n\n",
+                        "<problem>{}</problem>\n\n",
+                        "<answer>{}</answer>{}",
+                    ), conjecture, full_proof, context_section)
+                } else {
+                    // Chunk prompt
+                    format!(concat!(
+                        "You are an assistant highly proficient in mathematics. The user will provide a math problem together with its proposed solution, and your task is to verify the correctness of that solution according to the given instruction.\n",
+                        "We provide the original problem and the complete proposed solution for full context. ",
+                        "Then we provide a specific chunk from the solution for focused checking. ",
+                        "Your task: Check ONLY the given chunk for errors while considering the overall context.\n\n",
+                        "Checklist:\n",
+                        "1. The chunk's reasoning and calculations adhere to mathematical correctness.\n",
+                        "2. Any theorems used in the chunk match their hypotheses and conclusions.\n",
+                        "3. The chunk does not rely on assumptions not justified by the problem or earlier proven steps.\n\n",
+                        "Consistency and error-severity policy (important):\n",
+                        "- If only minor, easily fixable issues exist (e.g., small algebraic slips later corrected, notational typos, superficial formatting), treat the chunk as correct overall but briefly note such issues.\n",
+                        "- If there is any critical error that undermines correctness in this chunk (e.g., invalid step, wrong theorem usage without required conditions), treat the chunk as incorrect.\n\n",
+                        "Response requirements: If the chunk is correct overall (possibly with minor issues), reply with `<verification>true</verification>` and briefly list minor issues if any. ",
+                        "If the chunk is incorrect, reply with `<verification>false</verification>` followed by a concise description of the most harmful error in the proof that you found in the chunk.\n\n",
+                        "<problem>{}</problem>\n\n",
+                        "<full_answer>{}</full_answer>\n\n",
+                        "<chunk_index>{}</chunk_index>\n",
+                        "<chunk>{}</chunk>{}",
+                    ), conjecture, full_proof, chunk_id, chunk, context_section)
+                };
+
+                tasks.spawn(async move {
+                    client
+                        .comp(&prompt, &model, false, &reasoning_effort)
+                        .await
+                });
+            }
+
+            let mut passed_chunks = 0;
+            let mut failed = false;
+            let mut error_msg = String::new();
+
+            while let Some(res) = tasks.join_next().await {
+                match res {
+                    Ok(Ok(response)) => {
+                        if let Some(verdict) = extract_xml_content(&response, "verification") {
+                            if verdict == "false" {
+                                failed = true;
+                                error_msg = response; // Capture the full response as error explanation
+                                break;
+                            } else {
+                                passed_chunks += 1;
+                            }
+                        } else {
+                            warn!("No verification tag found in response: {}", response);
+                            passed_chunks += 1;
+                        }
+                    }
+                    Ok(Err(e)) => {
+                        error!("Error during verification: {}", e);
+                    }
+                    Err(e) => {
+                        error!("Task join error: {}", e);
+                    }
+                }
+            }
+
+            if failed {
+                tasks.shutdown().await;
+                info!(
+                    "Verification failed at iteration {}: {}",
+                    iteration, error_msg
+                );
+                return Some(error_msg);
+            }
+
+            // If all chunks passed, proceed to next iteration (finer granularity)
+            info!("Iteration {} passed ({} chunks)", iteration, passed_chunks);
+        }
+
+        info!("Progressive verification passed all iterations.");
+        None
     }
 }
 
