@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::agents::{
-    Agent, ContextGenerator, Explorer, Formatter, Memory, MemoryBlock, ProgressiveReviewer,
-    ProofSummarizer, Refiner, SimpleReviewer,
+    Agent, ContextGenerator, Explorer, Formatter, Memory, MemoryBlock, ProgressiveReviewResult,
+    ProgressiveReviewer, ProofSummarizer, Refiner, SimpleReviewer,
 };
 use crate::utils::{extract_all_component, extract_component, find_box};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -38,6 +38,7 @@ pub struct ResearchSessionConfig {
     eval_model: String,
     reform_model: String,
     reviewer: String,
+    max_review_iters: u8,
     steps: u32,
     reviews: u8,
     iterations: u8,
@@ -59,6 +60,7 @@ impl Default for ResearchSessionConfig {
             eval_model: String::new(),
             reform_model: String::new(),
             reviewer: "progressive".into(),
+            max_review_iters: 4,
             steps: 0,
             reviews: 12,
             iterations: 0,
@@ -96,6 +98,10 @@ impl ResearchSessionConfig {
     }
     pub fn reviewer(mut self, reviewer: impl Into<String>) -> Self {
         self.reviewer = reviewer.into();
+        self
+    }
+    pub fn max_review_iters(mut self, max_review_iters: u8) -> Self {
+        self.max_review_iters = max_review_iters;
         self
     }
     pub fn logdir(mut self, logdir: impl Into<String>) -> Self {
@@ -180,6 +186,7 @@ impl ResearchSession {
             .reasoning_effort(config.reasoning_effort.clone());
         let progressive_reviewer = ProgressiveReviewer::new()
             .model(&config.eval_model)
+            .max_iters(config.max_review_iters as usize)
             .reasoning_effort(config.reasoning_effort.clone());
         let refiner = Refiner::new()
             .model(&config.proof_model)
@@ -253,11 +260,12 @@ impl ResearchSession {
         Ok(())
     }
 
-    pub async fn review_mems(&mut self, ids: &Vec<usize>) -> Option<Vec<Option<String>>> {
+    pub async fn review_mems(&mut self, ids: &Vec<usize>) -> Option<Vec<(usize, Option<String>, u8)>> {
         info!("Start verifying proof path with {} nodes", ids.len());
-        let mut tasks: JoinSet<Option<String>> = JoinSet::new();
-        let mut res: Vec<Option<String>> = Vec::new();
+        let mut tasks: JoinSet<(usize, Option<String>, u8)> = JoinSet::new();
+        let mut res: Vec<(usize, Option<String>, u8)> = Vec::new();
         for i in ids {
+            let mem_id = *i;
             let memblock = &self.memory.memory[*i];
             let comment = memblock.get_comment().to_string();
             let memtype = memblock.memtype.to_string();
@@ -269,6 +277,7 @@ impl ResearchSession {
             if self.config.reviewer == "progressive" {
                 let mut reviewer = ProgressiveReviewer::new()
                     .model(&self.config.eval_model)
+                    .max_iters(self.config.max_review_iters as usize)
                     .reasoning_effort(self.config.reasoning_effort.clone());
                 if let Some(ctx) = context {
                     reviewer.set_context(ctx);
@@ -278,12 +287,13 @@ impl ResearchSession {
                 let arc_reviewer = Arc::new(reviewer);
                 tasks.spawn(async move {
                     if memtype == "context" || num_reviews >= MAX_PROGRESSIVE_REVIEWS_PER_NODE {
-                        return None;
+                        return (mem_id, None, 0);
                     }
                     if !comment.is_empty() {
-                        return Some(comment);
+                        return (mem_id, Some(comment), 0);
                     }
-                    return arc_reviewer.verify().await;
+                    let ProgressiveReviewResult { review, api_calls } = arc_reviewer.verify().await;
+                    (mem_id, review, api_calls)
                 });
             } else {
                 let mut reviewer = SimpleReviewer::new()
@@ -291,6 +301,7 @@ impl ResearchSession {
                     .reviews(self.config.reviews)
                     .streaming(false)
                     .reasoning_effort(self.config.reasoning_effort.clone());
+                let configured_reviews = self.config.reviews;
                 if let Some(ctx) = context {
                     reviewer.set_context(ctx);
                 }
@@ -299,27 +310,21 @@ impl ResearchSession {
                 let arc_reviewer = Arc::new(reviewer);
                 tasks.spawn(async move {
                     if memtype == "context" || num_reviews >= MAX_REVIEWS_PER_NODE {
-                        return None;
+                        return (mem_id, None, 0);
                     }
                     if !comment.is_empty() {
-                        return Some(comment);
+                        return (mem_id, Some(comment), 0);
                     }
-                    return arc_reviewer.pverify().await;
+                    let review = arc_reviewer.pverify().await;
+                    (mem_id, review, configured_reviews)
                 });
             }
         }
         while let Some(task_result) = tasks.join_next().await {
             match task_result {
-                Ok(review) => {
-                    if let Some(r) = review {
-                        res.push(Some(r));
-                    } else {
-                        res.push(None);
-                    }
-                }
+                Ok(review) => res.push(review),
                 Err(e) => {
                     error!("Task failed: {:#?}", e);
-                    res.push(None);
                 }
             }
         }
@@ -335,20 +340,33 @@ impl ResearchSession {
         info!("Start reviewing the proof path: {:?}", &proof_path_ids);
         let reviews = self.review_mems(&proof_path_ids).await.unwrap_or_default();
         info!("Obtained {} reviews in the proof path", reviews.len());
+        let reviews_by_id: std::collections::HashMap<usize, (Option<String>, u8)> = reviews
+            .into_iter()
+            .map(|(id, review, api_calls)| (id, (review, api_calls)))
+            .collect();
         // The correctness of this proofpath, default to true and changed to false once a flaw is
         // found in the proof path.
         let mut path_correctness = true;
         // iterate through proof path in the derivation order
-        for (i, rev) in proof_path_ids.iter().zip(reviews.iter()) {
+        for i in proof_path_ids.iter() {
             let mem = &mut self.memory.memory[*i];
             if mem.memtype == "context" {
                 continue;
             } // eliminate the given context
-            mem.set_reviews((mem.get_reviews() + self.config.reviews).min(MAX_REVIEWS_PER_NODE));
+            let (rev, api_calls) = reviews_by_id
+                .get(i)
+                .cloned()
+                .unwrap_or((None, 0));
+            let max_reviews = if self.config.reviewer == "progressive" {
+                MAX_PROGRESSIVE_REVIEWS_PER_NODE
+            } else {
+                MAX_REVIEWS_PER_NODE
+            };
+            mem.set_reviews((mem.get_reviews() + api_calls).min(max_reviews));
             if let Some(r) = rev {
                 // Found a flaw in one memblock
                 path_correctness = false;
-                mem.set_comment(r);
+                mem.set_comment(&r);
                 mem.set_reviews(0);
             }
             mem.set_solved(path_correctness);
@@ -707,15 +725,19 @@ impl ResearchSession {
             .zip(depss.iter_mut())
         {
             info!("Start verifying a conjecture");
+            let mut used_reviews: u8 = 0;
             for i in 0..self.config.iterations {
                 let review = if self.config.reviewer == "progressive" {
                     self.progressive_reviewer.set_conjecture(&*conj);
                     self.progressive_reviewer.set_proof(&*proof);
-                    self.progressive_reviewer.verify().await
+                    let result = self.progressive_reviewer.verify().await;
+                    used_reviews = used_reviews.saturating_add(result.api_calls);
+                    result.review
                 } else {
                     self.simple_reviewer.set_conjecture(&*conj);
                     self.simple_reviewer.set_proof(&*proof);
                     let arc_reviewer = Arc::new(self.simple_reviewer.clone());
+                    used_reviews = used_reviews.saturating_add(self.config.reviews);
                     arc_reviewer.pverify().await
                 };
 
@@ -752,7 +774,7 @@ impl ResearchSession {
                             .proof(&*proof)
                             .deps(serde_json::from_str::<Vec<usize>>(deps).unwrap_or_default())
                             .solved(true)
-                            .reviews(self.config.reviews),
+                            .reviews(used_reviews),
                     );
                     break;
                 }
@@ -761,16 +783,20 @@ impl ResearchSession {
 
         if let Some(mut final_proof) = extract_component(&raw_exploration, "final_proof") {
             info!("Start verifing the final proof");
+            let mut used_reviews: u8 = 0;
             for i in 0..self.config.iterations {
                 let review = if self.config.reviewer == "progressive" {
                     self.progressive_reviewer
                         .set_conjecture(&self.config.problem);
                     self.progressive_reviewer.set_proof(&final_proof);
-                    self.progressive_reviewer.verify().await
+                    let result = self.progressive_reviewer.verify().await;
+                    used_reviews = used_reviews.saturating_add(result.api_calls);
+                    result.review
                 } else {
                     self.simple_reviewer.set_conjecture(&self.config.problem);
                     self.simple_reviewer.set_proof(&final_proof);
                     let arc_reviewer = Arc::new(self.simple_reviewer.clone());
+                    used_reviews = used_reviews.saturating_add(self.config.reviews);
                     arc_reviewer.pverify().await
                 };
 
@@ -796,7 +822,7 @@ impl ResearchSession {
                                     .unwrap_or_default(),
                             )
                             .solved(true)
-                            .reviews(self.config.reviews),
+                            .reviews(used_reviews),
                     );
                     return Ok(true);
                 }

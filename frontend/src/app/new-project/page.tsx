@@ -19,6 +19,7 @@ export default function NewProjectPage() {
   const [evalModel, setEvalModel] = useState<string>('gpt-5.2');
   const [reformModel, setReformModel] = useState<string>('gpt-5.2');
   const [reviewer, setReviewer] = useState<string>('progressive');
+  const [maxReviewIters, setMaxReviewIters] = useState<number>(4);
   const [reasoningEffort, setReasoningEffort] = useState<'minimal'|'low'|'medium'|'high'>('high');
   const [steps, setSteps] = useState<number>(24);
   const [reviews, setReviews] = useState<number>(12);
@@ -36,6 +37,7 @@ export default function NewProjectPage() {
       evalModel,
       reformModel,
       reviewer,
+      maxReviewIters,
       reasoningEffort,
       steps,
       reviews,
@@ -175,6 +177,18 @@ export default function NewProjectPage() {
                     <option value="progressive">Progressive</option>
                   </select>
                 </div>
+                {reviewer === 'progressive' && (
+                <div>
+                  <label className="block text-sm text-gray-700">{t('max_review_iters_label')}</label>
+                  <input
+                    type="number"
+                    value={maxReviewIters}
+                    min={1} max={8}
+                    onChange={e => setMaxReviewIters(+e.target.value)}
+                    className="w-full border rounded p-1 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                )}
                 <div>
                   <label className="block text-sm text-gray-700">{t('steps_label')}</label>
                   <input

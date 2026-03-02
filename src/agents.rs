@@ -743,6 +743,11 @@ pub struct ProgressiveReviewer {
     min_chunk_size: usize,
 }
 
+pub struct ProgressiveReviewResult {
+    pub review: Option<String>,
+    pub api_calls: u8,
+}
+
 impl ProgressiveReviewer {
     pub fn new() -> Self {
         ProgressiveReviewer {
@@ -776,6 +781,10 @@ impl ProgressiveReviewer {
         self.reasoning_effort = effort.into();
         self
     }
+    pub fn max_iters(mut self, max_iters: usize) -> Self {
+        self.max_iters = max_iters;
+        self
+    }
 
     fn split_into_chunks(proof: &str, chunk_length: usize) -> Vec<String> {
         let lines: Vec<&str> = proof.lines().collect();
@@ -802,11 +811,12 @@ impl ProgressiveReviewer {
         self.min_chunk_size.max(approx_length)
     }
 
-    pub async fn verify(&self) -> Option<String> {
+    pub async fn verify(&self) -> ProgressiveReviewResult {
         info!(
             "Starting progressive verification (max_iters={})",
             self.max_iters
         );
+        let mut api_calls: u8 = 0;
 
         let mut context_prefix = String::new();
         if let Some(context) = &self.context {
@@ -820,6 +830,7 @@ impl ProgressiveReviewer {
             let chunk_length = self.chunk_length_for_iteration(&self.proof, iteration);
             let chunks = Self::split_into_chunks(&self.proof, chunk_length);
             let num_chunks = chunks.len();
+            api_calls = api_calls.saturating_add(num_chunks.min(u8::MAX as usize) as u8);
 
             info!(
                 "Iteration {}: Verifying {} chunks (len approx {})",
@@ -921,7 +932,10 @@ impl ProgressiveReviewer {
                     "Verification failed at iteration {}: {}",
                     iteration, error_msg
                 );
-                return Some(error_msg);
+                return ProgressiveReviewResult {
+                    review: Some(error_msg),
+                    api_calls,
+                };
             }
 
             // If all chunks passed, proceed to next iteration (finer granularity)
@@ -929,7 +943,10 @@ impl ProgressiveReviewer {
         }
 
         info!("Progressive verification passed all iterations.");
-        None
+        ProgressiveReviewResult {
+            review: None,
+            api_calls,
+        }
     }
 }
 

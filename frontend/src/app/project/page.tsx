@@ -105,6 +105,7 @@ interface ProjectConfig {
   proof_model: string;
   eval_model: string;
   reform_model: string;
+  max_review_iters?: number;
   reasoning_effort?: 'minimal'|'low'|'medium'|'high';
   steps: number;
   reviews: number;
@@ -402,6 +403,16 @@ const ProjectDetailContent: React.FC = () => {
                   className="w-full border rounded p-1 bg-gray-50 text-gray-700"
                 />
               </div>
+              {typeof configObj.max_review_iters === 'number' && (
+              <div>
+                <label className="block text-sm text-gray-700">Max Review Iters</label>
+                <input
+                  value={configObj.max_review_iters}
+                  readOnly
+                  className="w-full border rounded p-1 bg-gray-50 text-gray-700"
+                />
+              </div>
+              )}
             </div>
             <div className="flex items-center space-x-4 text-gray-700">
               <label className="flex items-center space-x-2">

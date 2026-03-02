@@ -575,6 +575,8 @@ struct NewProjectRequest {
     reform_model: String,
     #[serde(default = "default_reviewer")]
     reviewer: String,
+    #[serde(default = "default_max_review_iters")]
+    max_review_iters: u8,
     steps: u32,
     reviews: u8,
     iterations: u8,
@@ -591,6 +593,10 @@ fn default_reviewer() -> String {
 
 fn default_model() -> String {
     "gpt-5.2".into()
+}
+
+fn default_max_review_iters() -> u8 {
+    4
 }
 
 fn default_reasoning_effort() -> String {
@@ -706,7 +712,7 @@ async fn handle_new_project(
     let req = payload.into_inner();
     // Log project config
     info!(
-        "User {} project config: {{ problem: {}, context: {:?}, proof_model: {}, eval_model: {}, reform_model: {}, reviewer: {}, steps: {}, reviews: {}, iterations: {}, reformat: {}, theorem_graph: {}, reasoning_effort: {} }}",
+        "User {} project config: {{ problem: {}, context: {:?}, proof_model: {}, eval_model: {}, reform_model: {}, reviewer: {}, max_review_iters: {}, steps: {}, reviews: {}, iterations: {}, reformat: {}, theorem_graph: {}, reasoning_effort: {} }}",
         user_id,
         req.problem,
         req.context,
@@ -714,6 +720,7 @@ async fn handle_new_project(
         req.eval_model,
         req.reform_model,
         req.reviewer,
+        req.max_review_iters,
         req.steps,
         req.reviews,
         req.iterations,
@@ -727,6 +734,7 @@ async fn handle_new_project(
         .eval_model(req.eval_model)
         .reform_model(req.reform_model)
         .reviewer(req.reviewer)
+        .max_review_iters(req.max_review_iters.max(1))
         .steps(req.steps)
         .reviews(req.reviews)
         .iterations(req.iterations)

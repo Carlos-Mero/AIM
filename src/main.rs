@@ -31,6 +31,9 @@ struct Cli {
     /// Reviewer strategy ("simple" or "progressive")
     #[arg(long = "reviewer", default_value = "progressive")]
     reviewer: String,
+    /// Max progressive review iterations (only for reviewer=progressive)
+    #[arg(long = "max_review_iters", default_value_t = 4)]
+    max_review_iters: u8,
 
     /// Maximum exploration iterations
     #[arg(short = 's', long = "steps", default_value_t = 24)]
@@ -94,6 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .eval_model(cli.eval_model)
             .reform_model(cli.reform_model)
             .reviewer(cli.reviewer)
+            .max_review_iters(cli.max_review_iters.max(1))
             .steps(cli.steps)
             .reviews(cli.reviews)
             .iterations(cli.iterations)
