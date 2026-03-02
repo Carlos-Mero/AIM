@@ -220,6 +220,16 @@ impl Memory {
         with_proof: bool,
         include_end_node: bool,
     ) -> Option<String> {
+        self.format_deps_with_order(id, with_proof, include_end_node, true)
+    }
+
+    pub fn format_deps_with_order(
+        &self,
+        id: usize,
+        with_proof: bool,
+        include_end_node: bool,
+        reverse_order: bool,
+    ) -> Option<String> {
         let mut dep_ids = self.get_proof_path_ids(id, include_end_node);
         let mut res = String::new();
         // add the context information in memory id: 0 if exists
@@ -229,17 +239,33 @@ impl Memory {
             }
         }
 
-        for id in dep_ids.iter().rev() {
-            if let Some(memblock) = &self.memory.get(*id) {
-                res.push_str(&format!(
-                    "#### Memory **ID: {}**\n\n{}\n\n",
-                    id,
-                    if with_proof {
-                        memblock._format_with_proof()
-                    } else {
-                        memblock._format()
-                    }
-                ));
+        if reverse_order {
+            for id in dep_ids.iter().rev() {
+                if let Some(memblock) = &self.memory.get(*id) {
+                    res.push_str(&format!(
+                        "#### Memory **ID: {}**\n\n{}\n\n",
+                        id,
+                        if with_proof {
+                            memblock._format_with_proof()
+                        } else {
+                            memblock._format()
+                        }
+                    ));
+                }
+            }
+        } else {
+            for id in &dep_ids {
+                if let Some(memblock) = &self.memory.get(*id) {
+                    res.push_str(&format!(
+                        "#### Memory **ID: {}**\n\n{}\n\n",
+                        id,
+                        if with_proof {
+                            memblock._format_with_proof()
+                        } else {
+                            memblock._format()
+                        }
+                    ));
+                }
             }
         }
 

@@ -601,7 +601,7 @@ impl ResearchSession {
         }
         if let Some(proof_path_content) =
             self.memory
-                .format_deps(self.memory.memory.len() - 1, true, true)
+                .format_deps_with_order(self.memory.memory.len() - 1, true, true, false)
         {
             info!("Saving proof paths to path: {:#?}", pp_path);
             let contents = format!("# Complete Proof Path of AIM\n\n{}", proof_path_content);
@@ -979,4 +979,3 @@ impl Session for ResearchSession {
         }
     }
 }
-

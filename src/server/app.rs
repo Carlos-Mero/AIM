@@ -567,8 +567,11 @@ struct NewProjectRequest {
     title: String,
     problem: String,
     context: Option<String>,
+    #[serde(default = "default_model")]
     proof_model: String,
+    #[serde(default = "default_model")]
     eval_model: String,
+    #[serde(default = "default_model")]
     reform_model: String,
     #[serde(default = "default_reviewer")]
     reviewer: String,
@@ -584,6 +587,10 @@ struct NewProjectRequest {
 
 fn default_reviewer() -> String {
     "progressive".into()
+}
+
+fn default_model() -> String {
+    "gpt-5.2".into()
 }
 
 fn default_reasoning_effort() -> String {

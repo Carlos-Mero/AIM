@@ -15,9 +15,9 @@ export default function NewProjectPage() {
   const [context, setContext] = useState<string>('');
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
   // Advanced parameters matching ResearchSessionConfig
-  const [proofModel, setProofModel] = useState<string>('gpt-5');
-  const [evalModel, setEvalModel] = useState<string>('gpt-5');
-  const [reformModel, setReformModel] = useState<string>('gpt-5');
+  const [proofModel, setProofModel] = useState<string>('gpt-5.2');
+  const [evalModel, setEvalModel] = useState<string>('gpt-5.2');
+  const [reformModel, setReformModel] = useState<string>('gpt-5.2');
   const [reviewer, setReviewer] = useState<string>('progressive');
   const [reasoningEffort, setReasoningEffort] = useState<'minimal'|'low'|'medium'|'high'>('high');
   const [steps, setSteps] = useState<number>(24);

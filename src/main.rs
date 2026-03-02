@@ -19,13 +19,13 @@ struct Cli {
     problem: Option<String>,
 
     /// Proof Model that composes the proofs
-    #[arg(short = 'm', long = "proof_model", default_value = "gpt-5")]
+    #[arg(short = 'm', long = "proof_model", default_value = "gpt-5.2")]
     proof_model: String,
     /// Eval Model that evaluates the proofs
-    #[arg(long = "eval_model", default_value = "gpt-5")]
+    #[arg(long = "eval_model", default_value = "gpt-5.2")]
     eval_model: String,
     /// Reform Model that does other chores in the workflow
-    #[arg(long = "reform_model", default_value = "gpt-5")]
+    #[arg(long = "reform_model", default_value = "gpt-5.2")]
     reform_model: String,
 
     /// Reviewer strategy ("simple" or "progressive")

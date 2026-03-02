@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Suspense } from 'react';
 import { BlockMath, InlineMath } from 'react-katex';
 import 'katex/dist/katex.min.css';
@@ -82,6 +82,24 @@ interface Project {
   error?: string;
 }
 
+interface MemoryBlock {
+  memtype: string;
+  content: string;
+  proof: string;
+  solved: boolean;
+  created_at: string;
+  updated_at: string;
+  reviews: number;
+  comment: string;
+  deps: number[];
+}
+
+interface ProofPathSummary {
+  finalTheoremId: number | null;
+  pathIds: number[];
+  markdown: string;
+}
+
 // Type for project config serialized from backend (snake_case keys)
 interface ProjectConfig {
   proof_model: string;
@@ -94,6 +112,54 @@ interface ProjectConfig {
   reformat: boolean;
   theorem_graph_mode: boolean;
 }
+
+function formatMemoryBlockToMarkdown(id: number, memory: MemoryBlock): string {
+  const proofContent = memory.proof.trim().length > 0
+    ? `\n\\begin{proof}\n${memory.proof}\n\\end{proof}`
+    : '';
+  return `#### Memory **ID: ${id}**\n\n\\begin{${memory.memtype}}\n${memory.content}\n\n**DEPENDENCY**: ${JSON.stringify(memory.deps)}\n\\end{${memory.memtype}}${proofContent}\n`;
+}
+
+function buildProofPath(memory: MemoryBlock[]): ProofPathSummary {
+  if (!memory.length) {
+    return { finalTheoremId: null, pathIds: [], markdown: '' };
+  }
+
+  let finalTheoremId: number | null = null;
+  for (let i = memory.length - 1; i >= 0; i -= 1) {
+    if (memory[i].memtype === 'theorem') {
+      finalTheoremId = i;
+      break;
+    }
+  }
+  if (finalTheoremId === null) {
+    return { finalTheoremId, pathIds: [], markdown: '' };
+  }
+
+  const required = new Set<number>([finalTheoremId]);
+  const queue: number[] = [finalTheoremId];
+  while (queue.length > 0) {
+    const currentId = queue.shift();
+    if (currentId === undefined) break;
+    const block = memory[currentId];
+    if (!block) continue;
+    block.deps.forEach((depId) => {
+      if (!required.has(depId) && memory[depId]) {
+        required.add(depId);
+        queue.push(depId);
+      }
+    });
+  }
+
+  if (memory[0]?.memtype === 'context') {
+    required.add(0);
+  }
+
+  const pathIds = Array.from(required).sort((a, b) => a - b);
+  const markdown = pathIds.map((id) => formatMemoryBlockToMarkdown(id, memory[id])).join('\n');
+  return { finalTheoremId, pathIds, markdown };
+}
+
 const ProjectDetailContent: React.FC = () => {
   const { t } = useI18n();
   // read projectId from query string
@@ -124,6 +190,7 @@ const ProjectDetailContent: React.FC = () => {
   const [filter, setFilter] = useState<string>('');
   const [lemmas, setLemmas] = useState<Lemma[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const proofPath = useMemo(() => buildProofPath(project?.memory ?? []), [project]);
 
   // fetch and auto-reload project detail (initial load + interval)
   useEffect(() => {
@@ -202,6 +269,23 @@ const ProjectDetailContent: React.FC = () => {
 
 
   const filteredLemmas = lemmas.filter(l => (l.title.includes(filter) || l.statement.includes(filter)) && !l.title.includes("context"));
+  const hasFinalTheorem = proofPath.finalTheoremId !== null;
+  const isRunning = project?.status === 'running';
+
+  const projectStatusHint = useMemo(() => {
+    if (!project) return '';
+    if (hasFinalTheorem && isRunning) {
+      return 'A final theorem has been generated, but this project is still running. The proof path may continue to change.';
+    }
+    if (hasFinalTheorem) {
+      return 'Final theorem found. Review the proof path below before using it in formal work.';
+    }
+    if (isRunning) {
+      return 'This project is still running. A complete proof path will appear once a final theorem is produced.';
+    }
+    return 'This project ended without producing a final theorem. The list below is currently unavailable.';
+  }, [project, hasFinalTheorem, isRunning]);
+
   if (!token) return <p className="text-center mt-8">{t('please_login')}</p>;
   if (loading || !project) return <p className="text-center mt-8">{t('project_loading')}</p>;
   return (
@@ -331,6 +415,67 @@ const ProjectDetailContent: React.FC = () => {
             </div>
           </div>
         )}
+        <div className="bg-white rounded-2xl shadow p-6 mb-6">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-800">Complete Proof Path</h2>
+              <p className="text-sm text-gray-600 mt-1">
+                All required memory blocks are displayed in logical order from dependencies to final theorem.
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 mb-3">
+            <p className="text-sm text-blue-900">{projectStatusHint}</p>
+          </div>
+
+          {hasFinalTheorem && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mb-4">
+              <p className="text-sm text-amber-900">
+                Warning: this proof path is generated and verified by AI; it may still contain mistakes and should be independently checked.
+              </p>
+            </div>
+          )}
+
+          <CopyableBlock text={proofPath.markdown}>
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+              {!hasFinalTheorem ? (
+                <p className="text-sm text-gray-500">No complete proof path is available yet.</p>
+              ) : (
+                <div className="space-y-4">
+                  {proofPath.pathIds.map((id, index) => {
+                    const mem = project.memory[id];
+                    if (!mem) return null;
+                    return (
+                      <div key={`proof-path-${id}`} className="rounded-lg border border-gray-200 bg-white p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <h3 className="text-sm font-semibold text-gray-800">
+                            Step {index + 1}: {mem.memtype.toUpperCase()} (ID: {id})
+                          </h3>
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${mem.solved ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                            {mem.solved ? 'solved' : 'pending'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500 mb-3">Dependencies: [{mem.deps.join(', ')}]</p>
+                        <div className="prose text-gray-700 mb-3">
+                          {renderDescription(mem.content)}
+                        </div>
+                        {mem.proof.trim().length > 0 && (
+                          <div className="rounded-md bg-blue-50 border border-blue-100 p-3">
+                            <p className="text-sm font-semibold text-blue-800 mb-2">Proof</p>
+                            <div className="prose text-gray-700">
+                              {renderDescription(mem.proof)}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </CopyableBlock>
+        </div>
           {/* 主体区域：列表 & 详情 */}
           <div className="flex flex-col lg:flex-row gap-6 h-full">
             {/* 左侧：列表区 */}
