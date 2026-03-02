@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-Core Rust logic lives under `src/`: `main.rs` bootstraps the CLI/server, `aim.rs` orchestrates sessions, `agents.rs` defines reasoning pipelines, and `src/server` exposes the Actix + SeaORM HTTP stack. SQLite state persists in `aim.db`, with per-run traces stored under `logs/`. The Next.js UI is contained in `frontend/` (`src/` for routes/components, `public/` assets), while optional research tooling sits in `deer-flow/`.
+Core Rust logic lives under `src/`: `main.rs` bootstraps the CLI/server, `aim.rs` orchestrates sessions, `agents.rs` defines reasoning pipelines, and `src/server` exposes the Actix + SeaORM HTTP stack. SQLite state persists in `aim.db`, with per-run traces stored under `logs/`. The Next.js UI is contained in `frontend/` (`src/` for routes/components, `public/` assets).
 
 ## Build, Test, and Development Commands
 - `cargo build --release`: Compile the binary to `target/release/aim`.
@@ -9,7 +9,6 @@ Core Rust logic lives under `src/`: `main.rs` bootstraps the CLI/server, `aim.rs
 - `cargo install --path .`: Install `aim` into your local toolchain.
 - `npm install && npm run dev` inside `frontend/`: Dev server against `http://localhost:4000`.
 - `npm run build && npm run start`: Produce and serve the production bundle.
-- `uv run main.py` within `deer-flow/`: Run the optional literature workflow.
 
 ## Coding Style & Naming Conventions
 Rust code targets edition 2024: four-space indentation, snake_case functions/modules, UpperCamelCase types. Always run `cargo fmt` plus `cargo clippy --all-targets --all-features`; treat clippy warnings as blockers. Frontend code should satisfy `npm run lint`, keep React components in PascalCase files, prefer hooks-based state, and reserve kebab-case for route folders. Secrets (`.env`, `.webui_secret_key`, SQLite files) must stay out of version control.

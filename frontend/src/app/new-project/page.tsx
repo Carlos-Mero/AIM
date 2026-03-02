@@ -12,32 +12,30 @@ export default function NewProjectPage() {
   const { t } = useI18n();
   const [title, setTitle] = useState<string>('');
   const [problem, setProblem] = useState<string>('');
-  // Mode: 'standard' requires both problem and context; 'deer-flow' sends empty context
-  const [mode, setMode] = useState<'standard' | 'deer-flow'>('deer-flow');
   const [context, setContext] = useState<string>('');
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
   // Advanced parameters matching ResearchSessionConfig
   const [proofModel, setProofModel] = useState<string>('gpt-5');
   const [evalModel, setEvalModel] = useState<string>('gpt-5');
   const [reformModel, setReformModel] = useState<string>('gpt-5');
+  const [reviewer, setReviewer] = useState<string>('progressive');
   const [reasoningEffort, setReasoningEffort] = useState<'minimal'|'low'|'medium'|'high'>('high');
   const [steps, setSteps] = useState<number>(24);
-  const [reviews, setReviews] = useState<number>(3);
+  const [reviews, setReviews] = useState<number>(12);
   const [iterations, setIterations] = useState<number>(4);
   const [reformat, setReformat] = useState<boolean>(true);
   const [theoremGraph, setTheoremGraph] = useState<boolean>(true);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // send empty context in 'deer-flow' mode
-    const contextToSend = mode === 'standard' ? context : '';
     const config = {
       title,
       problem,
-      context: contextToSend,
+      context,
       proofModel,
       evalModel,
       reformModel,
+      reviewer,
       reasoningEffort,
       steps,
       reviews,
@@ -76,32 +74,6 @@ export default function NewProjectPage() {
           </header>
           <div className="px-8 py-6 space-y-6">
           <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Mode switch: standard vs deer-flow */}
-            <div className="flex items-center space-x-4">
-              <span className="font-medium text-gray-700">{t('mode_label')}</span>
-              <button
-                type="button"
-                onClick={() => setMode('standard')}
-                className={`px-3 py-1 rounded ${
-                  mode === 'standard'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-200 text-gray-700'
-                }`}
-              >
-                {t('mode_standard')}
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode('deer-flow')}
-                className={`px-3 py-1 rounded ${
-                  mode === 'deer-flow'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-200 text-gray-700'
-                }`}
-              >
-                {t('mode_deer_flow')}
-              </button>
-            </div>
           <div>
             <label htmlFor="title" className="block text-xl font-bold text-gray-900 mb-2">
               {t('title_label')}
@@ -130,8 +102,6 @@ export default function NewProjectPage() {
               placeholder={t('problem_placeholder')}
             />
           </div>
-          {/* Context input only in standard mode */}
-          {mode === 'standard' && (
             <div>
               <label htmlFor="context" className="block text-xl font-bold text-gray-900 mb-2">
                 {t('context_label')}
@@ -140,13 +110,11 @@ export default function NewProjectPage() {
                 id="context"
                 value={context}
                 onChange={e => setContext(e.target.value)}
-                required
                 rows={6}
                 className="w-full border border-gray-300 rounded-md p-2 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder={t('context_placeholder')}
               />
             </div>
-          )}
           <div>
             <button
               type="button"
@@ -197,6 +165,17 @@ export default function NewProjectPage() {
                   </select>
                 </div>
                 <div>
+                  <label className="block text-sm text-gray-700">Reviewer Type</label>
+                  <select
+                    value={reviewer}
+                    onChange={e => setReviewer(e.target.value)}
+                    className="w-full border rounded p-1 bg-gray-50 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="simple">Simple</option>
+                    <option value="progressive">Progressive</option>
+                  </select>
+                </div>
+                <div>
                   <label className="block text-sm text-gray-700">{t('steps_label')}</label>
                   <input
                     type="number"
@@ -206,6 +185,7 @@ export default function NewProjectPage() {
                     className="w-full border rounded p-1 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
+                {reviewer === 'simple' && (
                 <div>
                   <label className="block text-sm text-gray-700">{t('reviews_label')}</label>
                   <input
@@ -216,6 +196,7 @@ export default function NewProjectPage() {
                     className="w-full border border-gray-300 rounded p-1 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
+                )}
                 <div>
                   <label className="block text-sm text-gray-700">{t('iterations_label')}</label>
                   <input

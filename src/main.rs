@@ -28,12 +28,16 @@ struct Cli {
     #[arg(long = "reform_model", default_value = "gpt-5")]
     reform_model: String,
 
+    /// Reviewer strategy ("simple" or "progressive")
+    #[arg(long = "reviewer", default_value = "progressive")]
+    reviewer: String,
+
     /// Maximum exploration iterations
     #[arg(short = 's', long = "steps", default_value_t = 24)]
     steps: u32,
 
     /// parallel reviews in pessimistic verification
-    #[arg(short = 'r', long = "reviews", default_value_t = 3)]
+    #[arg(short = 'r', long = "reviews", default_value_t = 12)]
     reviews: u8,
 
     /// Maximum refine iterations
@@ -89,6 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .proof_model(cli.proof_model)
             .eval_model(cli.eval_model)
             .reform_model(cli.reform_model)
+            .reviewer(cli.reviewer)
             .steps(cli.steps)
             .reviews(cli.reviews)
             .iterations(cli.iterations)

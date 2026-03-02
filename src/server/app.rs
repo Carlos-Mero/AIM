@@ -570,6 +570,8 @@ struct NewProjectRequest {
     proof_model: String,
     eval_model: String,
     reform_model: String,
+    #[serde(default = "default_reviewer")]
+    reviewer: String,
     steps: u32,
     reviews: u8,
     iterations: u8,
@@ -578,6 +580,10 @@ struct NewProjectRequest {
     /// Reasoning effort for reasoning-capable models ("minimal" | "low" | "medium" | "high")
     #[serde(default = "default_reasoning_effort")]
     reasoning_effort: String,
+}
+
+fn default_reviewer() -> String {
+    "progressive".into()
 }
 
 fn default_reasoning_effort() -> String {
@@ -693,13 +699,14 @@ async fn handle_new_project(
     let req = payload.into_inner();
     // Log project config
     info!(
-        "User {} project config: {{ problem: {}, context: {:?}, proof_model: {}, eval_model: {}, reform_model: {}, steps: {}, reviews: {}, iterations: {}, reformat: {}, theorem_graph: {}, reasoning_effort: {} }}",
+        "User {} project config: {{ problem: {}, context: {:?}, proof_model: {}, eval_model: {}, reform_model: {}, reviewer: {}, steps: {}, reviews: {}, iterations: {}, reformat: {}, theorem_graph: {}, reasoning_effort: {} }}",
         user_id,
         req.problem,
         req.context,
         req.proof_model,
         req.eval_model,
         req.reform_model,
+        req.reviewer,
         req.steps,
         req.reviews,
         req.iterations,
@@ -712,6 +719,7 @@ async fn handle_new_project(
         .proof_model(req.proof_model)
         .eval_model(req.eval_model)
         .reform_model(req.reform_model)
+        .reviewer(req.reviewer)
         .steps(req.steps)
         .reviews(req.reviews)
         .iterations(req.iterations)

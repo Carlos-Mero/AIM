@@ -3,9 +3,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::agents::{
-    Agent, Explorer, Formatter, Memory, MemoryBlock, ProofSummarizer, Refiner, Reviewer,
+    Agent, ContextGenerator, Explorer, Formatter, Memory, MemoryBlock, ProgressiveReviewer,
+    ProofSummarizer, Refiner, SimpleReviewer,
 };
-use crate::utils::{extract_all_component, extract_component, find_box, search_bkg_deer_flow};
+use crate::utils::{extract_all_component, extract_component, find_box};
 use indicatif::{ProgressBar, ProgressStyle};
 use tokio::task::JoinSet;
 
@@ -27,14 +28,16 @@ pub trait Session: Send {
 }
 
 const MAX_REVIEWS_PER_NODE: u8 = 24;
+const MAX_PROGRESSIVE_REVIEWS_PER_NODE: u8 = 63;
 
-#[derive(Default, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ResearchSessionConfig {
     title: String,
     logdir: PathBuf,
     proof_model: String,
     eval_model: String,
     reform_model: String,
+    reviewer: String,
     steps: u32,
     reviews: u8,
     iterations: u8,
@@ -46,6 +49,29 @@ pub struct ResearchSessionConfig {
     streaming: bool,          // streaming output in exploration
     theorem_graph_mode: bool, // whether to use theorem graph mode
     reasoning_effort: String, // new field for reasoning_effort
+}
+impl Default for ResearchSessionConfig {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            logdir: PathBuf::new(),
+            proof_model: String::new(),
+            eval_model: String::new(),
+            reform_model: String::new(),
+            reviewer: "progressive".into(),
+            steps: 0,
+            reviews: 12,
+            iterations: 0,
+            currect_steps: 0,
+            problem: String::new(),
+            context: String::new(),
+            resume: false,
+            reformat: false,
+            streaming: false,
+            theorem_graph_mode: false,
+            reasoning_effort: String::new(),
+        }
+    }
 }
 
 impl ResearchSessionConfig {
@@ -66,6 +92,10 @@ impl ResearchSessionConfig {
     }
     pub fn reform_model(mut self, reform_model: impl Into<String>) -> Self {
         self.reform_model = reform_model.into();
+        self
+    }
+    pub fn reviewer(mut self, reviewer: impl Into<String>) -> Self {
+        self.reviewer = reviewer.into();
         self
     }
     pub fn logdir(mut self, logdir: impl Into<String>) -> Self {
@@ -125,10 +155,13 @@ impl ResearchSessionConfig {
     }
 }
 
+// ...
+
 pub struct ResearchSession {
     config: ResearchSessionConfig,
     explorer: Explorer,
-    reviewer: Reviewer,
+    simple_reviewer: SimpleReviewer,
+    progressive_reviewer: ProgressiveReviewer,
     refiner: Refiner,
     memory: Memory,
 }
@@ -140,10 +173,13 @@ impl ResearchSession {
             .model(&config.proof_model)
             .streaming(config.streaming)
             .reasoning_effort(config.reasoning_effort.clone());
-        let reviewer = Reviewer::new()
+        let simple_reviewer = SimpleReviewer::new()
             .model(&config.eval_model)
             .reviews(config.reviews)
             .streaming(config.streaming && (config.reviews == 1))
+            .reasoning_effort(config.reasoning_effort.clone());
+        let progressive_reviewer = ProgressiveReviewer::new()
+            .model(&config.eval_model)
             .reasoning_effort(config.reasoning_effort.clone());
         let refiner = Refiner::new()
             .model(&config.proof_model)
@@ -161,7 +197,8 @@ impl ResearchSession {
         ResearchSession {
             config: config,
             explorer: explorer,
-            reviewer: reviewer,
+            simple_reviewer: simple_reviewer,
+            progressive_reviewer: progressive_reviewer,
             refiner: refiner,
             memory: mem,
         }
@@ -170,17 +207,23 @@ impl ResearchSession {
     pub async fn load_context(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let context_path = self.config.logdir.as_path().join("context.md");
         if !context_path.exists() {
-            info!("No context provided to this problem, searching for related info via deer-flow.");
-            let context = search_bkg_deer_flow(&self.config.problem).await?;
-            info!("loaded problem context: {:?}", &context);
+            info!("No context provided to this problem. Generating context via LLM...");
+            let generator = ContextGenerator::new()
+                .model(&self.config.proof_model)
+                .problem(&self.config.problem)
+                .reasoning_effort(self.config.reasoning_effort.clone());
+            let context = generator._process().await?;
+            info!("Generated problem context length: {}", context.len());
+
+            // Save to file
+            fs::write(&context_path, &context)?;
+
             self.memory.update(
                 MemoryBlock::new()
                     .memtype("context")
                     .content(context)
                     .solved(true),
             );
-            // warn!("Problem context does not exist in session: {:#?}!", &context_path);
-            // info!("Running AIM without problem context.");
             return Ok(());
         }
         let context = fs::read_to_string(context_path)?;
@@ -215,29 +258,55 @@ impl ResearchSession {
         let mut tasks: JoinSet<Option<String>> = JoinSet::new();
         let mut res: Vec<Option<String>> = Vec::new();
         for i in ids {
-            let mut reviewer = Reviewer::new()
-                .model(&self.config.eval_model)
-                .reviews(self.config.reviews)
-                .streaming(false);
             let memblock = &self.memory.memory[*i];
             let comment = memblock.get_comment().to_string();
             let memtype = memblock.memtype.to_string();
             let num_reviews = memblock.get_reviews();
-            if let Some(context) = self.memory.format_deps(*i, false, false) {
-                reviewer.set_context(context);
+            let context = self.memory.format_deps(*i, false, false);
+            let conjecture = memblock.content.clone();
+            let proof = memblock.proof.clone();
+
+            if self.config.reviewer == "progressive" {
+                let mut reviewer = ProgressiveReviewer::new()
+                    .model(&self.config.eval_model)
+                    .reasoning_effort(self.config.reasoning_effort.clone());
+                if let Some(ctx) = context {
+                    reviewer.set_context(ctx);
+                }
+                reviewer.set_conjecture(conjecture);
+                reviewer.set_proof(proof);
+                let arc_reviewer = Arc::new(reviewer);
+                tasks.spawn(async move {
+                    if memtype == "context" || num_reviews >= MAX_PROGRESSIVE_REVIEWS_PER_NODE {
+                        return None;
+                    }
+                    if !comment.is_empty() {
+                        return Some(comment);
+                    }
+                    return arc_reviewer.verify().await;
+                });
+            } else {
+                let mut reviewer = SimpleReviewer::new()
+                    .model(&self.config.eval_model)
+                    .reviews(self.config.reviews)
+                    .streaming(false)
+                    .reasoning_effort(self.config.reasoning_effort.clone());
+                if let Some(ctx) = context {
+                    reviewer.set_context(ctx);
+                }
+                reviewer.set_conjecture(conjecture);
+                reviewer.set_proof(proof);
+                let arc_reviewer = Arc::new(reviewer);
+                tasks.spawn(async move {
+                    if memtype == "context" || num_reviews >= MAX_REVIEWS_PER_NODE {
+                        return None;
+                    }
+                    if !comment.is_empty() {
+                        return Some(comment);
+                    }
+                    return arc_reviewer.pverify().await;
+                });
             }
-            reviewer.set_conjecture(&memblock.content);
-            reviewer.set_proof(&memblock.proof);
-            let arc_reviewer = Arc::new(reviewer);
-            tasks.spawn(async move {
-                if memtype == "context" || num_reviews >= MAX_REVIEWS_PER_NODE {
-                    return None;
-                }
-                if !comment.is_empty() {
-                    return Some(comment);
-                }
-                return arc_reviewer.pverify().await;
-            });
         }
         while let Some(task_result) = tasks.join_next().await {
             match task_result {
@@ -372,7 +441,8 @@ impl ResearchSession {
         self.memory.update(nmemory);
         if let Some(context) = self.memory.format_all_with_proof_summary(true) {
             self.explorer.set_context(&context);
-            self.reviewer.set_context(&context);
+            self.simple_reviewer.set_context(&context);
+            self.progressive_reviewer.set_context(&context);
             self.refiner.set_context(&context);
         }
     }
@@ -388,30 +458,7 @@ impl ResearchSession {
         &mut self,
         db: &DatabaseConnection,
         project_filter: &str,
-        need_search: bool,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        if need_search {
-            let new_ctx = search_bkg_deer_flow(&self.config.problem).await?;
-            self.update_memory_graph(
-                MemoryBlock::new()
-                    .memtype("context")
-                    .content(&new_ctx)
-                    .solved(true),
-            );
-            let mem_json = serde_json::to_string(&self.memory.memory)?;
-            let now = Utc::now().to_rfc3339().replace("'", "''");
-            let ctx_sql = new_ctx.replace("'", "''");
-            let upd_sql = format!(
-                "UPDATE projects SET context='{}', memory='{}', last_active='{}' WHERE {}",
-                ctx_sql,
-                mem_json.replace("'", "''"),
-                now,
-                project_filter,
-            );
-            db.execute(Statement::from_string(DbBackend::Sqlite, upd_sql))
-                .await?;
-        }
-
         let mut solved_flag = false;
         for _ in 0..self.config.steps {
             let done = if self.config.theorem_graph_mode {
@@ -592,9 +639,10 @@ impl ResearchSession {
                     .content(&conj)
                     .proof(&proof)
                     .deps(serde_json::from_str::<Vec<usize>>(&deps).unwrap_or_default())
-                    .solved(false)
+                    .solved(true)
                     .reviews(0),
             );
+            return Ok(false);
         } else {
             info!("Collected the final proof of this problem.");
             self.update_memory_graph(
@@ -606,24 +654,24 @@ impl ResearchSession {
                     .solved(false)
                     .reviews(0),
             );
-        }
-        let memid = self.memory.memory.len() - 1;
-        for i in 0..self.config.iterations + 1 {
-            info!("Starting the {}-th iteration", i);
-            if self.backtrace_review_from(memid).await? {
-                info!("backtrace review ended and the proof path is correct.");
-                break;
-            } else if i < self.config.iterations {
-                info!("Some flaws were found in this proof path");
-                self.backtrace_refine_from(memid).await?;
+            let memid = self.memory.memory.len() - 1;
+            for i in 0..self.config.iterations + 1 {
+                info!("Starting the {}-th iteration", i);
+                if self.backtrace_review_from(memid).await? {
+                    info!("backtrace review ended and the proof path is correct.");
+                    break;
+                } else if i < self.config.iterations {
+                    info!("Some flaws were found in this proof path");
+                    self.backtrace_refine_from(memid).await?;
+                }
             }
-        }
 
-        if self.memory.memory[memid].is_solved()
-            && self.memory.memory[memid].memtype == "theorem"
-            && self.memory.memory[memid].content == self.config.problem
-        {
-            return Ok(true);
+            if self.memory.memory[memid].is_solved()
+                && self.memory.memory[memid].memtype == "theorem"
+                && self.memory.memory[memid].content == self.config.problem
+            {
+                return Ok(true);
+            }
         }
         return Ok(false);
     }
@@ -660,10 +708,18 @@ impl ResearchSession {
         {
             info!("Start verifying a conjecture");
             for i in 0..self.config.iterations {
-                self.reviewer.set_conjecture(&*conj);
-                self.reviewer.set_proof(&*proof);
-                let arc_reviewer = Arc::new(self.reviewer.clone());
-                if let Some(review) = arc_reviewer.pverify().await {
+                let review = if self.config.reviewer == "progressive" {
+                    self.progressive_reviewer.set_conjecture(&*conj);
+                    self.progressive_reviewer.set_proof(&*proof);
+                    self.progressive_reviewer.verify().await
+                } else {
+                    self.simple_reviewer.set_conjecture(&*conj);
+                    self.simple_reviewer.set_proof(&*proof);
+                    let arc_reviewer = Arc::new(self.simple_reviewer.clone());
+                    arc_reviewer.pverify().await
+                };
+
+                if let Some(r) = review {
                     // Directly end this exploration step when one conjecture fails after several
                     // iterations
                     if i == self.config.iterations - 1 {
@@ -673,7 +729,7 @@ impl ResearchSession {
                     info!("A flaw was found in the proof, trying to refine.");
                     self.refiner.set_conjecture(&*conj);
                     self.refiner.set_proof(&*proof);
-                    self.refiner.set_review(review);
+                    self.refiner.set_review(r);
                     let raw_refinement = self.refiner._process().await?;
                     if let Some(judgement) = find_box(&raw_refinement) {
                         if judgement == "false" {
@@ -706,16 +762,25 @@ impl ResearchSession {
         if let Some(mut final_proof) = extract_component(&raw_exploration, "final_proof") {
             info!("Start verifing the final proof");
             for i in 0..self.config.iterations {
-                self.reviewer.set_conjecture(&self.config.problem);
-                self.reviewer.set_proof(&final_proof);
-                let arc_reviewer = Arc::new(self.reviewer.clone());
-                if let Some(review) = arc_reviewer.pverify().await {
+                let review = if self.config.reviewer == "progressive" {
+                    self.progressive_reviewer
+                        .set_conjecture(&self.config.problem);
+                    self.progressive_reviewer.set_proof(&final_proof);
+                    self.progressive_reviewer.verify().await
+                } else {
+                    self.simple_reviewer.set_conjecture(&self.config.problem);
+                    self.simple_reviewer.set_proof(&final_proof);
+                    let arc_reviewer = Arc::new(self.simple_reviewer.clone());
+                    arc_reviewer.pverify().await
+                };
+
+                if let Some(r) = review {
                     if i == self.config.iterations - 1 {
                         return Ok(false);
                     }
                     self.refiner.set_conjecture(&self.config.problem);
                     self.refiner.set_proof(&final_proof);
-                    self.refiner.set_review(review);
+                    self.refiner.set_review(r);
                     let raw_refinement = self.refiner._process().await?;
                     if let Some(n_proof) = extract_component(&raw_refinement, "proof") {
                         final_proof = n_proof;
@@ -810,25 +875,23 @@ impl Session for ResearchSession {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Set up problem and initial context/memory
         self.explorer.set_problem(self.config.problem.clone());
-        // Prepare timestamp and initial record
-        let ts = Utc::now().to_rfc3339().replace("'", "''");
-        let cfg_json = serde_json::to_string(&self.config)?;
-        let init_mem = serde_json::to_string(&self.memory)?;
-        // Determine if we need to fetch context via deer-flow
-        let ctx = self
+
+        // Determine if context exists
+        let existing_ctx = self
             .memory
             .memory
             .iter()
             .find(|m| m.memtype == "context")
-            .map(|m| m.content.clone())
-            .unwrap_or_default();
-        let need_search = ctx.is_empty();
-        // Insert placeholder for initial project record
-        let ctx_for_insert = if need_search {
-            String::from("Researching via deer-flow...")
-        } else {
-            ctx.clone()
-        };
+            .map(|m| m.content.clone());
+
+        let need_gen = existing_ctx.is_none();
+        let ctx_for_insert = existing_ctx.unwrap_or_else(|| "Generating context...".to_string());
+
+        // Prepare timestamp and initial record
+        let ts = Utc::now().to_rfc3339().replace("'", "''");
+        let cfg_json = serde_json::to_string(&self.config)?;
+        let init_mem = serde_json::to_string(&self.memory)?;
+
         let title = self.config.title.replace("'", "''");
         // initial lemma count from memory blocks
         let init_lemmas = self
@@ -837,6 +900,7 @@ impl Session for ResearchSession {
             .iter()
             .filter(|m| m.memtype == "lemma")
             .count() as i32;
+
         let insert_sql = format!(
             "INSERT INTO projects (user_id, title, problem, context, config, memory, created_at, last_active, lemmas_count, status) VALUES ({}, '{}', '{}', '{}', '{}', '{}', '{}', '{}', {}, 'running')",
             user_id,
@@ -851,10 +915,37 @@ impl Session for ResearchSession {
         );
         db.execute(Statement::from_string(DbBackend::Sqlite, insert_sql))
             .await?;
+
         let project_filter = format!("user_id={} AND created_at='{}'", user_id, ts);
-        let run_result = self
-            .drive_remote_pipeline(db, &project_filter, need_search)
-            .await;
+
+        // If context was missing, generate it now and update DB
+        if need_gen {
+            info!("No context provided. Generating context via LLM for remote session...");
+            let generator = ContextGenerator::new()
+                .model(&self.config.proof_model)
+                .problem(&self.config.problem)
+                .reasoning_effort(self.config.reasoning_effort.clone());
+            let context = generator._process().await?;
+            self.memory.update(
+                MemoryBlock::new()
+                    .memtype("context")
+                    .content(&context)
+                    .solved(true),
+            );
+
+            // Update DB with real context and updated memory
+            let updated_mem = serde_json::to_string(&self.memory)?;
+            let upd_sql = format!(
+                "UPDATE projects SET context='{}', memory='{}' WHERE {}",
+                context.replace("'", "''"),
+                updated_mem.replace("'", "''"),
+                project_filter
+            );
+            db.execute(Statement::from_string(DbBackend::Sqlite, upd_sql))
+                .await?;
+        }
+
+        let run_result = self.drive_remote_pipeline(db, &project_filter).await;
         match run_result {
             Ok(solved_flag) => {
                 let status = if solved_flag { "solved" } else { "ended" };
@@ -888,3 +979,4 @@ impl Session for ResearchSession {
         }
     }
 }
+
