@@ -4,7 +4,7 @@ use crate::server::entity::user::{
 };
 use crate::sessions::{ResearchSession, ResearchSessionConfig, Session};
 use actix_cors::Cors;
-use actix_files::Files;
+use actix_files::{Files, NamedFile};
 use actix_web::web::Path;
 use actix_web::{App, HttpRequest, HttpResponse, HttpServer, Responder, web};
 use bcrypt::{DEFAULT_COST, hash, verify};
@@ -26,6 +26,22 @@ fn is_admin_email(user_email: &str) -> bool {
         Ok(list) => list.split(',').map(str::trim).any(|e| e == user_email),
         Err(_) => false,
     }
+}
+
+async fn serve_frontend_index(req: HttpRequest) -> actix_web::Result<NamedFile> {
+    let route = req.path().trim_matches('/');
+    if !route.is_empty() {
+        let html_file = format!("./frontend/out/{}.html", route);
+        if std::path::Path::new(&html_file).exists() {
+            return Ok(NamedFile::open(html_file)?);
+        }
+
+        let nested_index = format!("./frontend/out/{}/index.html", route);
+        if std::path::Path::new(&nested_index).exists() {
+            return Ok(NamedFile::open(nested_index)?);
+        }
+    }
+    Ok(NamedFile::open("./frontend/out/index.html")?)
 }
 
 /// JWT claims
@@ -163,7 +179,11 @@ pub async fn run(bind_addr: &str) -> std::io::Result<()> {
                     .route("/projects", web::get().to(handle_list_projects)),
             )
             // Static assets for SPA (responds to GET/HEAD only)
-            .service(Files::new("/", "./frontend/out").index_file("index.html"))
+            .service(
+                Files::new("/", "./frontend/out")
+                    .index_file("index.html")
+                    .default_handler(web::to(serve_frontend_index)),
+            )
     })
     // bind to provided address (e.g., "0.0.0.0:port")
     .bind(bind_addr)?

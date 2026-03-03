@@ -850,51 +850,55 @@ impl ProgressiveReviewer {
 
                 let prompt = if iteration == 0 {
                     // Standard prompt for whole proof
-                    format!(concat!(
-                        "You are an assistant highly proficient in mathematics. The user will provide a math problem together with its proposed solution, and your task is to verify the correctness of that solution according to the given instruction.\n",
-                        "Here is a math problem and a candidate solution of it, and you need to verify the correctness of this solution. Please check each of the following:\n\n",
-                        "1. The provided content is indeed a math problem and its corresponding solution, rather than unrelated material supplied by mistake.\n",
-                        "2. The solution actually derives the conclusion required by the original problem.\n",
-                        "3. Every step of calculation and formula derivation in the solution is correct.\n",
-                        "4. The hypotheses (conditions) and conclusions of any theorems used are correctly matched and applied.\n",
-                        "5. The solution relies only on the conditions given in the problem and does not introduce any additional assumptions to obtain the conclusion.\n\n",
-                        "Consistency and error-severity policy (important):\n",
-                        "- If only minor, easily fixable issues exist (e.g., small algebraic slips later corrected, notational typos, superficial formatting), treat the solution as correct overall but briefly note such issues.\n",
-                        "- If there is any critical error that undermines correctness (e.g., invalid step, wrong theorem usage without required conditions, uncorrected calculation error leading to a wrong result), treat the solution as incorrect.\n\n",
-                        "Response requirements: If the solution is correct overall (possibly with minor issues), reply with `<verification>true</verification>` and briefly list minor issues if any.",
-                        " If the solution is incorrect, reply with `<verification>false</verification>` followed by a concise description of the most harmful error.",
-                        " Do not include any restatement of the entire solution or problem.\n\n",
-                        "<problem>{}</problem>\n\n",
-                        "<answer>{}</answer>{}",
-                    ), conjecture, full_proof, context_section)
+                    format!(
+                        concat!(
+                            "You are an assistant highly proficient in mathematics. The user will provide a math problem together with its proposed solution, and your task is to verify the correctness of that solution according to the given instruction.\n",
+                            "Here is a math problem and a candidate solution of it, and you need to verify the correctness of this solution. Please check each of the following:\n\n",
+                            "1. The provided content is indeed a math problem and its corresponding solution, rather than unrelated material supplied by mistake.\n",
+                            "2. The solution actually derives the conclusion required by the original problem.\n",
+                            "3. Every step of calculation and formula derivation in the solution is correct.\n",
+                            "4. The hypotheses (conditions) and conclusions of any theorems used are correctly matched and applied.\n",
+                            "5. The solution relies only on the conditions given in the problem and does not introduce any additional assumptions to obtain the conclusion.\n\n",
+                            "Consistency and error-severity policy (important):\n",
+                            "- If only minor, easily fixable issues exist (e.g., small algebraic slips later corrected, notational typos, superficial formatting), treat the solution as correct overall but briefly note such issues.\n",
+                            "- If there is any critical error that undermines correctness (e.g., invalid step, wrong theorem usage without required conditions, uncorrected calculation error leading to a wrong result), treat the solution as incorrect.\n\n",
+                            "Response requirements: If the solution is correct overall (possibly with minor issues), reply with `<verification>true</verification>` and briefly list minor issues if any.",
+                            " If the solution is incorrect, reply with `<verification>false</verification>` followed by a concise description of the most harmful error.",
+                            " Do not include any restatement of the entire solution or problem.\n\n",
+                            "<problem>{}</problem>\n\n",
+                            "<answer>{}</answer>{}",
+                        ),
+                        conjecture, full_proof, context_section
+                    )
                 } else {
                     // Chunk prompt
-                    format!(concat!(
-                        "You are an assistant highly proficient in mathematics. The user will provide a math problem together with its proposed solution, and your task is to verify the correctness of that solution according to the given instruction.\n",
-                        "We provide the original problem and the complete proposed solution for full context. ",
-                        "Then we provide a specific chunk from the solution for focused checking. ",
-                        "Your task: Check ONLY the given chunk for errors while considering the overall context.\n\n",
-                        "Checklist:\n",
-                        "1. The chunk's reasoning and calculations adhere to mathematical correctness.\n",
-                        "2. Any theorems used in the chunk match their hypotheses and conclusions.\n",
-                        "3. The chunk does not rely on assumptions not justified by the problem or earlier proven steps.\n\n",
-                        "Consistency and error-severity policy (important):\n",
-                        "- If only minor, easily fixable issues exist (e.g., small algebraic slips later corrected, notational typos, superficial formatting), treat the chunk as correct overall but briefly note such issues.\n",
-                        "- If there is any critical error that undermines correctness in this chunk (e.g., invalid step, wrong theorem usage without required conditions), treat the chunk as incorrect.\n\n",
-                        "Response requirements: If the chunk is correct overall (possibly with minor issues), reply with `<verification>true</verification>` and briefly list minor issues if any. ",
-                        "If the chunk is incorrect, reply with `<verification>false</verification>` followed by a concise description of the most harmful error in the proof that you found in the chunk.\n\n",
-                        "<problem>{}</problem>\n\n",
-                        "<full_answer>{}</full_answer>\n\n",
-                        "<chunk_index>{}</chunk_index>\n",
-                        "<chunk>{}</chunk>{}",
-                    ), conjecture, full_proof, chunk_id, chunk, context_section)
+                    format!(
+                        concat!(
+                            "You are an assistant highly proficient in mathematics. The user will provide a math problem together with its proposed solution, and your task is to verify the correctness of that solution according to the given instruction.\n",
+                            "We provide the original problem and the complete proposed solution for full context. ",
+                            "Then we provide a specific chunk from the solution for focused checking. ",
+                            "Your task: Check ONLY the given chunk for errors while considering the overall context.\n\n",
+                            "Checklist:\n",
+                            "1. The chunk's reasoning and calculations adhere to mathematical correctness.\n",
+                            "2. Any theorems used in the chunk match their hypotheses and conclusions.\n",
+                            "3. The chunk does not rely on assumptions not justified by the problem or earlier proven steps.\n\n",
+                            "Consistency and error-severity policy (important):\n",
+                            "- If only minor, easily fixable issues exist (e.g., small algebraic slips later corrected, notational typos, superficial formatting), treat the chunk as correct overall but briefly note such issues.\n",
+                            "- If there is any critical error that undermines correctness in this chunk (e.g., invalid step, wrong theorem usage without required conditions), treat the chunk as incorrect.\n\n",
+                            "Response requirements: If the chunk is correct overall (possibly with minor issues), reply with `<verification>true</verification>` and briefly list minor issues if any. ",
+                            "If the chunk is incorrect, reply with `<verification>false</verification>` followed by a concise description of the most harmful error in the proof that you found in the chunk.\n\n",
+                            "<problem>{}</problem>\n\n",
+                            "<full_answer>{}</full_answer>\n\n",
+                            "<chunk_index>{}</chunk_index>\n",
+                            "<chunk>{}</chunk>{}",
+                        ),
+                        conjecture, full_proof, chunk_id, chunk, context_section
+                    )
                 };
 
-                tasks.spawn(async move {
-                    client
-                        .comp(&prompt, &model, false, &reasoning_effort)
-                        .await
-                });
+                tasks.spawn(
+                    async move { client.comp(&prompt, &model, false, &reasoning_effort).await },
+                );
             }
 
             let mut passed_chunks = 0;
