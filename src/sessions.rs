@@ -260,7 +260,10 @@ impl ResearchSession {
         Ok(())
     }
 
-    pub async fn review_mems(&mut self, ids: &Vec<usize>) -> Option<Vec<(usize, Option<String>, u8)>> {
+    pub async fn review_mems(
+        &mut self,
+        ids: &Vec<usize>,
+    ) -> Option<Vec<(usize, Option<String>, u8)>> {
         info!("Start verifying proof path with {} nodes", ids.len());
         let mut tasks: JoinSet<(usize, Option<String>, u8)> = JoinSet::new();
         let mut res: Vec<(usize, Option<String>, u8)> = Vec::new();
@@ -353,10 +356,7 @@ impl ResearchSession {
             if mem.memtype == "context" {
                 continue;
             } // eliminate the given context
-            let (rev, api_calls) = reviews_by_id
-                .get(i)
-                .cloned()
-                .unwrap_or((None, 0));
+            let (rev, api_calls) = reviews_by_id.get(i).cloned().unwrap_or((None, 0));
             let max_reviews = if self.config.reviewer == "progressive" {
                 MAX_PROGRESSIVE_REVIEWS_PER_NODE
             } else {

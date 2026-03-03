@@ -59,7 +59,6 @@ pub fn extract_component(text: &str, tag: &str) -> Option<String> {
         })
 }
 
-
 pub fn extract_all_component(text: &str, tag: &str) -> Vec<String> {
     // Extract all the content in the xml-style tag (tags excluded)
     let escaped_tag = regex_escape(tag);
@@ -85,4 +84,3 @@ pub fn extract_all_component(text: &str, tag: &str) -> Vec<String> {
     }
     contents
 }
-
